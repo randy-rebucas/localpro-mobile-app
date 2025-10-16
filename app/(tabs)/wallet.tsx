@@ -1,9 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Modal,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,6 +13,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { API_CONFIG, ApiUtils, buildApiUrl, getApiHeaders } from '../../config/api';
 import { useAuth } from '../../contexts/AuthContext';
 
 interface Transaction {
@@ -22,6 +24,8 @@ interface Transaction {
   date: string;
   status: 'completed' | 'pending' | 'failed';
   category: string;
+  reference?: string;
+  fee?: number;
 }
 
 interface PaymentMethod {
@@ -30,122 +34,277 @@ interface PaymentMethod {
   name: string;
   lastFour: string;
   isDefault: boolean;
+  expiryDate?: string;
+  brand?: string;
+}
+
+interface FinanceOverview {
+  balance: number;
+  monthlyEarnings: number;
+  monthlyExpenses: number;
+  totalEarnings: number;
+  totalExpenses: number;
+  pendingAmount: number;
+}
+
+interface ApiResponse<T> {
+  success: boolean;
+  data?: T;
+  message?: string;
+  error?: string;
 }
 
 export default function WalletScreen() {
-  const { user, isLoading } = useAuth();
+  const { user, token, isLoading } = useAuth();
   const [showAddMoney, setShowAddMoney] = useState(false);
   const [showSendMoney, setShowSendMoney] = useState(false);
   const [showRequestMoney, setShowRequestMoney] = useState(false);
   const [amount, setAmount] = useState('');
   const [recipient, setRecipient] = useState('');
   const [note, setNote] = useState('');
+  
+  // API data state
+  const [financeOverview, setFinanceOverview] = useState<FinanceOverview | null>(null);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Mock wallet data - in a real app, this would come from API
-  const walletBalance = 1250.75;
-  const monthlyEarnings = 3200.50;
-  const monthlySpending = 1950.25;
-
-  const transactions: Transaction[] = [
-    {
-      id: '1',
-      type: 'credit',
-      amount: 500.00,
-      description: 'Service Payment - Plumbing Repair',
-      date: '2024-01-15',
-      status: 'completed',
-      category: 'service'
-    },
-    {
-      id: '2',
-      type: 'debit',
-      amount: 75.50,
-      description: 'Supplies Purchase',
-      date: '2024-01-14',
-      status: 'completed',
-      category: 'supplies'
-    },
-    {
-      id: '3',
-      type: 'credit',
-      amount: 300.00,
-      description: 'Service Payment - Electrical Work',
-      date: '2024-01-13',
-      status: 'completed',
-      category: 'service'
-    },
-    {
-      id: '4',
-      type: 'debit',
-      amount: 25.00,
-      description: 'App Subscription',
-      date: '2024-01-12',
-      status: 'completed',
-      category: 'subscription'
-    },
-    {
-      id: '5',
-      type: 'credit',
-      amount: 150.00,
-      description: 'Service Payment - HVAC Maintenance',
-      date: '2024-01-11',
-      status: 'pending',
-      category: 'service'
+  // API Functions
+  const fetchFinanceOverview = async () => {
+    try {
+      const response = await fetch(
+        buildApiUrl(API_CONFIG.ENDPOINTS.FINANCE.OVERVIEW),
+        {
+          method: 'GET',
+          headers: getApiHeaders(token || undefined),
+        }
+      );
+      
+      const data: ApiResponse<FinanceOverview> = await response.json();
+      
+      if (data.success && data.data) {
+        setFinanceOverview(data.data);
+      } else {
+        throw new Error(data.error || 'Failed to fetch finance overview');
+      }
+    } catch (err) {
+      console.error('Error fetching finance overview:', err);
+      setError(err instanceof Error ? err.message : 'Failed to fetch finance overview');
     }
-  ];
+  };
 
-  const paymentMethods: PaymentMethod[] = [
-    {
-      id: '1',
-      type: 'card',
-      name: 'Visa **** 4242',
-      lastFour: '4242',
-      isDefault: true
-    },
-    {
-      id: '2',
-      type: 'bank',
-      name: 'Chase Bank **** 1234',
-      lastFour: '1234',
-      isDefault: false
+  const fetchTransactions = async (page: number = 1, limit: number = 10) => {
+    try {
+      const url = ApiUtils.buildUrlWithParams(
+        buildApiUrl(API_CONFIG.ENDPOINTS.FINANCE.TRANSACTIONS),
+        ApiUtils.paginationParams(page, limit)
+      );
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: getApiHeaders(token || undefined),
+      });
+      
+      const data: ApiResponse<{ transactions: Transaction[]; pagination: any }> = await response.json();
+      
+      if (data.success && data.data) {
+        if (page === 1) {
+          setTransactions(data.data?.transactions || []);
+        } else {
+          setTransactions(prev => [...prev, ...(data.data?.transactions || [])]);
+        }
+      } else {
+        throw new Error(data.error || 'Failed to fetch transactions');
+      }
+    } catch (err) {
+      console.error('Error fetching transactions:', err);
+      setError(err instanceof Error ? err.message : 'Failed to fetch transactions');
     }
-  ];
+  };
 
-  const handleAddMoney = () => {
+  const fetchPaymentMethods = async () => {
+    try {
+      const response = await fetch(
+        buildApiUrl(API_CONFIG.ENDPOINTS.FINANCE.WALLET_SETTINGS),
+        {
+          method: 'GET',
+          headers: getApiHeaders(token || undefined),
+        }
+      );
+      
+      const data: ApiResponse<{ paymentMethods: PaymentMethod[] }> = await response.json();
+      
+      if (data.success && data.data) {
+        setPaymentMethods(data.data.paymentMethods || []);
+      } else {
+        throw new Error(data.error || 'Failed to fetch payment methods');
+      }
+    } catch (err) {
+      console.error('Error fetching payment methods:', err);
+      setError(err instanceof Error ? err.message : 'Failed to fetch payment methods');
+    }
+  };
+
+  const loadWalletData = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      await Promise.all([
+        fetchFinanceOverview(),
+        fetchTransactions(),
+        fetchPaymentMethods(),
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadWalletData();
+    setRefreshing(false);
+  };
+
+  useEffect(() => {
+    if (token) {
+      loadWalletData();
+    }
+  }, [token]);
+
+  const handleAddMoney = async () => {
     if (!amount || parseFloat(amount) <= 0) {
       Alert.alert('Invalid Amount', 'Please enter a valid amount');
       return;
     }
-    // In a real app, this would call the payment API
-    Alert.alert('Success', `Added $${amount} to your wallet`);
-    setShowAddMoney(false);
-    setAmount('');
+
+    try {
+      setLoading(true);
+      
+      // This would typically integrate with a payment gateway like PayPal or PayMaya
+      // For now, we'll simulate the API call
+      const response = await fetch(
+        buildApiUrl(API_CONFIG.ENDPOINTS.FINANCE.OVERVIEW),
+        {
+          method: 'POST',
+          headers: getApiHeaders(token || undefined),
+          body: JSON.stringify({
+            amount: parseFloat(amount),
+            type: 'deposit',
+            description: 'Wallet top-up',
+          }),
+        }
+      );
+      
+      const data: ApiResponse<any> = await response.json();
+      
+      if (data.success) {
+        Alert.alert('Success', `Added $${amount} to your wallet`);
+        setShowAddMoney(false);
+        setAmount('');
+        // Refresh wallet data
+        await loadWalletData();
+      } else {
+        throw new Error(data.error || 'Failed to add money');
+      }
+    } catch (err) {
+      console.error('Error adding money:', err);
+      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to add money');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleSendMoney = () => {
+  const handleSendMoney = async () => {
     if (!amount || !recipient || parseFloat(amount) <= 0) {
       Alert.alert('Invalid Input', 'Please enter valid amount and recipient');
       return;
     }
-    // In a real app, this would call the transfer API
-    Alert.alert('Success', `Sent $${amount} to ${recipient}`);
-    setShowSendMoney(false);
-    setAmount('');
-    setRecipient('');
-    setNote('');
+
+    try {
+      setLoading(true);
+      
+      const response = await fetch(
+        buildApiUrl(API_CONFIG.ENDPOINTS.FINANCE.TRANSACTIONS),
+        {
+          method: 'POST',
+          headers: getApiHeaders(token || undefined),
+          body: JSON.stringify({
+            amount: parseFloat(amount),
+            recipient,
+            note,
+            type: 'transfer',
+            description: `Transfer to ${recipient}`,
+          }),
+        }
+      );
+      
+      const data: ApiResponse<any> = await response.json();
+      
+      if (data.success) {
+        Alert.alert('Success', `Sent $${amount} to ${recipient}`);
+        setShowSendMoney(false);
+        setAmount('');
+        setRecipient('');
+        setNote('');
+        // Refresh wallet data
+        await loadWalletData();
+      } else {
+        throw new Error(data.error || 'Failed to send money');
+      }
+    } catch (err) {
+      console.error('Error sending money:', err);
+      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to send money');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleRequestMoney = () => {
+  const handleRequestMoney = async () => {
     if (!amount || !recipient || parseFloat(amount) <= 0) {
       Alert.alert('Invalid Input', 'Please enter valid amount and recipient');
       return;
     }
-    // In a real app, this would call the request API
-    Alert.alert('Success', `Money request sent to ${recipient}`);
-    setShowRequestMoney(false);
-    setAmount('');
-    setRecipient('');
-    setNote('');
+
+    try {
+      setLoading(true);
+      
+      const response = await fetch(
+        buildApiUrl(API_CONFIG.ENDPOINTS.FINANCE.TRANSACTIONS),
+        {
+          method: 'POST',
+          headers: getApiHeaders(token || undefined),
+          body: JSON.stringify({
+            amount: parseFloat(amount),
+            recipient,
+            note,
+            type: 'request',
+            description: `Money request from ${recipient}`,
+          }),
+        }
+      );
+      
+      const data: ApiResponse<any> = await response.json();
+      
+      if (data.success) {
+        Alert.alert('Success', `Money request sent to ${recipient}`);
+        setShowRequestMoney(false);
+        setAmount('');
+        setRecipient('');
+        setNote('');
+        // Refresh wallet data
+        await loadWalletData();
+      } else {
+        throw new Error(data.error || 'Failed to send money request');
+      }
+    } catch (err) {
+      console.error('Error requesting money:', err);
+      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to send money request');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getTransactionIcon = (category: string, type: 'credit' | 'debit') => {
@@ -168,7 +327,7 @@ export default function WalletScreen() {
     }
   };
 
-  if (isLoading) {
+  if (isLoading || loading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
@@ -181,7 +340,13 @@ export default function WalletScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.scrollView} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.title}>Wallet</Text>
@@ -195,23 +360,34 @@ export default function WalletScreen() {
               <Ionicons name="eye-outline" size={20} color="#6b7280" />
             </TouchableOpacity>
           </View>
-          <Text style={styles.balanceAmount}>${walletBalance.toFixed(2)}</Text>
+          <Text style={styles.balanceAmount}>
+            ${financeOverview?.balance?.toFixed(2) || '0.00'}
+          </Text>
           
           <View style={styles.balanceStats}>
             <View style={styles.statItem}>
               <Text style={styles.statLabel}>This Month</Text>
               <Text style={[styles.statValue, { color: '#10b981' }]}>
-                +${monthlyEarnings.toFixed(2)}
+                +${financeOverview?.monthlyEarnings?.toFixed(2) || '0.00'}
               </Text>
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
               <Text style={styles.statLabel}>Spent</Text>
               <Text style={[styles.statValue, { color: '#ef4444' }]}>
-                -${monthlySpending.toFixed(2)}
+                -${financeOverview?.monthlyExpenses?.toFixed(2) || '0.00'}
               </Text>
             </View>
           </View>
+          
+          {financeOverview?.pendingAmount && financeOverview.pendingAmount > 0 && (
+            <View style={styles.pendingAmount}>
+              <Text style={styles.pendingLabel}>Pending</Text>
+              <Text style={styles.pendingValue}>
+                ${financeOverview.pendingAmount.toFixed(2)}
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Quick Actions */}
@@ -283,6 +459,17 @@ export default function WalletScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Error Display */}
+        {error && (
+          <View style={styles.errorContainer}>
+            <Ionicons name="alert-circle" size={20} color="#ef4444" />
+            <Text style={styles.errorText}>{error}</Text>
+            <TouchableOpacity onPress={loadWalletData} style={styles.retryButton}>
+              <Text style={styles.retryText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* Recent Transactions */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
@@ -292,7 +479,16 @@ export default function WalletScreen() {
             </TouchableOpacity>
           </View>
           
-          {transactions.map((transaction) => (
+          {transactions.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="receipt-outline" size={48} color="#d1d5db" />
+              <Text style={styles.emptyStateText}>No transactions yet</Text>
+              <Text style={styles.emptyStateSubtext}>
+                Your transaction history will appear here
+              </Text>
+            </View>
+          ) : (
+            transactions.map((transaction) => (
             <View key={transaction.id} style={styles.transaction}>
               <View style={styles.transactionIcon}>
                 <Ionicons 
@@ -328,7 +524,8 @@ export default function WalletScreen() {
                 {transaction.type === 'credit' ? '+' : '-'}${transaction.amount.toFixed(2)}
               </Text>
             </View>
-          ))}
+            ))
+          )}
         </View>
       </ScrollView>
 
@@ -809,5 +1006,67 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+  pendingAmount: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#f3f4f6',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  pendingLabel: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  pendingValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#f59e0b',
+  },
+  errorContainer: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 20,
+    marginBottom: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  errorText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#dc2626',
+    marginLeft: 8,
+  },
+  retryButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#dc2626',
+    borderRadius: 6,
+  },
+  retryText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyStateText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6b7280',
+    marginTop: 12,
+  },
+  emptyStateSubtext: {
+    fontSize: 14,
+    color: '#9ca3af',
+    marginTop: 4,
+    textAlign: 'center',
   },
 });

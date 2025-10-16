@@ -29,6 +29,7 @@ interface AuthTokens {
 
 interface AuthContextType {
   user: User | null;
+  token: string | null;
   isLoading: boolean;
   sendVerificationCode: (phone: string) => Promise<void>;
   verifyCode: (phone: string, code: string, firstName: string, lastName: string, email?: string) => Promise<void>;
@@ -220,6 +221,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return (
     <AuthContext.Provider value={{ 
       user, 
+      token,
       isLoading, 
       sendVerificationCode, 
       verifyCode, 

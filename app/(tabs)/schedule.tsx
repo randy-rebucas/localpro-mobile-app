@@ -1,10 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   FlatList,
   Modal,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,6 +14,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { API_CONFIG, ApiUtils, buildApiUrl, getApiHeaders } from '../../config/api';
 import { useAuth } from '../../contexts/AuthContext';
 
 interface Appointment {
@@ -22,8 +24,9 @@ interface Appointment {
   date: string;
   time: string;
   duration: number;
-  status: 'scheduled' | 'in-progress' | 'completed' | 'cancelled';
+  status: 'scheduled' | 'in-progress' | 'completed' | 'cancelled' | 'pending' | 'confirmed';
   client: {
+    id?: string;
     name: string;
     phone: string;
     email?: string;
@@ -31,6 +34,10 @@ interface Appointment {
   location: string;
   notes?: string;
   color: string;
+  createdAt?: string;
+  updatedAt?: string;
+  serviceId?: string;
+  providerId?: string;
 }
 
 interface TimeSlot {
@@ -39,8 +46,21 @@ interface TimeSlot {
   appointment?: Appointment;
 }
 
+interface ApiResponse<T = any> {
+  success: boolean;
+  data?: T;
+  message?: string;
+  error?: string;
+  pagination?: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
 export default function ScheduleScreen() {
-  const { user, isLoading } = useAuth();
+  const { user, token, isLoading } = useAuth();
   const [viewMode, setViewMode] = useState<'day' | 'week' | 'month'>('week');
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showNewAppointment, setShowNewAppointment] = useState(false);
@@ -57,75 +77,69 @@ export default function ScheduleScreen() {
     location: '',
     notes: ''
   });
+  
+  // API data state
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Mock appointment data
-  const appointments: Appointment[] = [
-    {
-      id: '1',
-      title: 'Plumbing Repair - Kitchen Sink',
-      type: 'service',
-      date: '2024-01-20',
-      time: '09:00',
-      duration: 120,
-      status: 'scheduled',
-      client: {
-        name: 'John Smith',
-        phone: '+1 (555) 123-4567',
-        email: 'john@example.com'
-      },
-      location: '123 Main St, City',
-      notes: 'Kitchen sink is leaking under the cabinet',
-      color: '#3b82f6'
-    },
-    {
-      id: '2',
-      title: 'Electrical Installation',
-      type: 'service',
-      date: '2024-01-20',
-      time: '14:00',
-      duration: 180,
-      status: 'scheduled',
-      client: {
-        name: 'Sarah Johnson',
-        phone: '+1 (555) 987-6543',
-        email: 'sarah@example.com'
-      },
-      location: '456 Oak Ave, City',
-      notes: 'Install new outlet in living room',
-      color: '#f59e0b'
-    },
-    {
-      id: '3',
-      title: 'HVAC Maintenance',
-      type: 'maintenance',
-      date: '2024-01-21',
-      time: '10:00',
-      duration: 90,
-      status: 'scheduled',
-      client: {
-        name: 'Mike Wilson',
-        phone: '+1 (555) 456-7890'
-      },
-      location: '789 Pine St, City',
-      color: '#10b981'
-    },
-    {
-      id: '4',
-      title: 'Safety Inspection',
-      type: 'inspection',
-      date: '2024-01-22',
-      time: '11:00',
-      duration: 60,
-      status: 'scheduled',
-      client: {
-        name: 'Lisa Brown',
-        phone: '+1 (555) 321-0987',
-        email: 'lisa@example.com'
-      },
-      location: '321 Elm St, City',
-      color: '#8b5cf6'
+  // API Functions
+  const fetchAppointments = async (page: number = 1, limit: number = 50) => {
+    try {
+      const url = ApiUtils.buildUrlWithParams(
+        buildApiUrl(API_CONFIG.ENDPOINTS.MARKETPLACE.BOOKINGS.GET_ALL),
+        {
+          ...ApiUtils.paginationParams(page, limit),
+          // Add date filter for schedule view
+          date: selectedDate.toISOString().split('T')[0],
+        }
+      );
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: getApiHeaders(token || undefined),
+      });
+      
+      const data: ApiResponse<{ bookings: Appointment[]; pagination: any }> = await response.json();
+      
+      if (data.success && data.data) {
+        if (page === 1) {
+          setAppointments(data.data.bookings || []);
+        } else {
+          setAppointments(prev => [...prev, ...(data.data?.bookings || [])]);
+        }
+      } else {
+        throw new Error(data.error || 'Failed to fetch appointments');
+      }
+    } catch (err) {
+      console.error('Error fetching appointments:', err);
+      setError(err instanceof Error ? err.message : 'Failed to fetch appointments');
     }
-  ];
+  };
+
+  const loadScheduleData = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      await fetchAppointments();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadScheduleData();
+    setRefreshing(false);
+  };
+
+  useEffect(() => {
+    if (token) {
+      loadScheduleData();
+    }
+  }, [token, selectedDate]);
 
   // Generate time slots for the day
   const generateTimeSlots = (date: string): TimeSlot[] => {
@@ -186,30 +200,100 @@ export default function ScheduleScreen() {
     });
   };
 
-  const handleCreateAppointment = () => {
+  const handleCreateAppointment = async () => {
     if (!appointmentForm.title || !appointmentForm.time || !appointmentForm.clientName) {
       Alert.alert('Missing Information', 'Please fill in all required fields');
       return;
     }
-    // In a real app, this would call the appointment API
-    Alert.alert('Success', 'Appointment created successfully!');
-    setShowNewAppointment(false);
-    setAppointmentForm({
-      title: '',
-      type: 'service',
-      time: '',
-      duration: 60,
-      clientName: '',
-      clientPhone: '',
-      clientEmail: '',
-      location: '',
-      notes: ''
-    });
+
+    try {
+      setLoading(true);
+      
+      const response = await fetch(
+        buildApiUrl(API_CONFIG.ENDPOINTS.MARKETPLACE.BOOKINGS.CREATE),
+        {
+          method: 'POST',
+          headers: getApiHeaders(token || undefined),
+          body: JSON.stringify({
+            title: appointmentForm.title,
+            type: appointmentForm.type,
+            date: selectedDate.toISOString().split('T')[0],
+            time: appointmentForm.time,
+            duration: appointmentForm.duration,
+            clientName: appointmentForm.clientName,
+            clientPhone: appointmentForm.clientPhone,
+            clientEmail: appointmentForm.clientEmail,
+            location: appointmentForm.location,
+            notes: appointmentForm.notes,
+            status: 'scheduled',
+          }),
+        }
+      );
+      
+      const data: ApiResponse<Appointment> = await response.json();
+      
+      if (data.success && data.data) {
+        Alert.alert('Success', 'Appointment created successfully!');
+        setShowNewAppointment(false);
+        setAppointmentForm({
+          title: '',
+          type: 'service',
+          time: '',
+          duration: 60,
+          clientName: '',
+          clientPhone: '',
+          clientEmail: '',
+          location: '',
+          notes: ''
+        });
+        // Refresh schedule data
+        await loadScheduleData();
+      } else {
+        throw new Error(data.error || 'Failed to create appointment');
+      }
+    } catch (err) {
+      console.error('Error creating appointment:', err);
+      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to create appointment');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleAppointmentPress = (appointment: Appointment) => {
     setSelectedAppointment(appointment);
     setShowAppointmentDetails(true);
+  };
+
+  const handleUpdateAppointmentStatus = async (appointmentId: string, status: string) => {
+    try {
+      setLoading(true);
+      
+      const response = await fetch(
+        buildApiUrl(API_CONFIG.ENDPOINTS.MARKETPLACE.BOOKINGS.UPDATE_STATUS(appointmentId)),
+        {
+          method: 'PUT',
+          headers: getApiHeaders(token || undefined),
+          body: JSON.stringify({
+            status: status,
+          }),
+        }
+      );
+      
+      const data: ApiResponse<Appointment> = await response.json();
+      
+      if (data.success) {
+        Alert.alert('Success', `Appointment ${status} successfully`);
+        // Refresh schedule data
+        await loadScheduleData();
+      } else {
+        throw new Error(data.error || `Failed to ${status} appointment`);
+      }
+    } catch (err) {
+      console.error(`Error updating appointment status:`, err);
+      Alert.alert('Error', err instanceof Error ? err.message : `Failed to ${status} appointment`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCancelAppointment = (appointmentId: string) => {
@@ -221,14 +305,26 @@ export default function ScheduleScreen() {
         { 
           text: 'Yes', 
           style: 'destructive',
-          onPress: () => {
-            // In a real app, this would call the cancel API
-            Alert.alert('Success', 'Appointment cancelled successfully');
-          }
+          onPress: () => handleUpdateAppointmentStatus(appointmentId, 'cancelled')
         }
       ]
     );
   };
+
+  const handleCompleteAppointment = (appointmentId: string) => {
+    Alert.alert(
+      'Complete Appointment',
+      'Mark this appointment as completed?',
+      [
+        { text: 'No', style: 'cancel' },
+        { 
+          text: 'Yes', 
+          onPress: () => handleUpdateAppointmentStatus(appointmentId, 'completed')
+        }
+      ]
+    );
+  };
+
 
   const renderAppointmentCard = ({ item }: { item: Appointment }) => (
     <TouchableOpacity 
@@ -297,7 +393,7 @@ export default function ScheduleScreen() {
   const todayAppointments = appointments.filter(apt => apt.date === selectedDate.toISOString().split('T')[0]);
   const timeSlots = generateTimeSlots(selectedDate.toISOString().split('T')[0]);
 
-  if (isLoading) {
+  if (isLoading || loading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
@@ -310,7 +406,13 @@ export default function ScheduleScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.scrollView} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Schedule</Text>
@@ -322,6 +424,17 @@ export default function ScheduleScreen() {
             <Text style={styles.newAppointmentButtonText}>New</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Error Display */}
+        {error && (
+          <View style={styles.errorContainer}>
+            <Ionicons name="alert-circle" size={20} color="#ef4444" />
+            <Text style={styles.errorText}>{error}</Text>
+            <TouchableOpacity onPress={loadScheduleData} style={styles.retryButton}>
+              <Text style={styles.retryText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* View Mode Selector */}
         <View style={styles.viewModeContainer}>
@@ -927,5 +1040,33 @@ const styles = StyleSheet.create({
   },
   appointmentDetailInfo: {
     gap: 12,
+  },
+  errorContainer: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 20,
+    marginBottom: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  errorText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#dc2626',
+    marginLeft: 8,
+  },
+  retryButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#dc2626',
+    borderRadius: 6,
+  },
+  retryText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#fff',
   },
 });

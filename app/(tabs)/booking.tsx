@@ -1,18 +1,20 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    Modal,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Modal,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { API_CONFIG, ApiUtils, buildApiUrl, getApiHeaders } from '../../config/api';
 import { useAuth } from '../../contexts/AuthContext';
 
 interface Booking {
@@ -22,8 +24,9 @@ interface Booking {
   date: string;
   time: string;
   duration: number;
-  status: 'upcoming' | 'completed' | 'cancelled' | 'in-progress';
+  status: 'upcoming' | 'completed' | 'cancelled' | 'in-progress' | 'pending' | 'confirmed';
   provider: {
+    id: string;
     name: string;
     rating: number;
     avatar?: string;
@@ -31,6 +34,9 @@ interface Booking {
   location: string;
   price: number;
   notes?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  serviceId?: string;
 }
 
 interface ServiceCategory {
@@ -41,67 +47,131 @@ interface ServiceCategory {
   services: string[];
 }
 
+interface Service {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  price: number;
+  duration: number;
+  provider: {
+    id: string;
+    name: string;
+    rating: number;
+    avatar?: string;
+  };
+  location: string;
+  images?: string[];
+  isAvailable: boolean;
+}
+
+interface ApiResponse<T = any> {
+  success: boolean;
+  data?: T;
+  message?: string;
+  error?: string;
+  pagination?: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
 export default function BookingScreen() {
-  const { user, isLoading } = useAuth();
+  const { user, token, isLoading } = useAuth();
   const [activeTab, setActiveTab] = useState<'upcoming' | 'past'>('upcoming');
   const [showNewBooking, setShowNewBooking] = useState(false);
   const [selectedService, setSelectedService] = useState('');
   const [selectedDate, setSelectedDate] = useState('');
   const [selectedTime, setSelectedTime] = useState('');
   const [notes, setNotes] = useState('');
+  
+  // API data state
+  const [bookings, setBookings] = useState<Booking[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Mock booking data
-  const bookings: Booking[] = [
-    {
-      id: '1',
-      serviceName: 'Plumbing Repair',
-      serviceType: 'Emergency',
-      date: '2024-01-20',
-      time: '10:00 AM',
-      duration: 120,
-      status: 'upcoming',
-      provider: {
-        name: 'John Smith',
-        rating: 4.8,
-        avatar: undefined
-      },
-      location: '123 Main St, City',
-      price: 150.00,
-      notes: 'Kitchen sink is leaking'
-    },
-    {
-      id: '2',
-      serviceName: 'Electrical Installation',
-      serviceType: 'Installation',
-      date: '2024-01-18',
-      time: '2:00 PM',
-      duration: 180,
-      status: 'completed',
-      provider: {
-        name: 'Mike Johnson',
-        rating: 4.9,
-        avatar: undefined
-      },
-      location: '456 Oak Ave, City',
-      price: 300.00
-    },
-    {
-      id: '3',
-      serviceName: 'HVAC Maintenance',
-      serviceType: 'Maintenance',
-      date: '2024-01-15',
-      time: '9:00 AM',
-      duration: 90,
-      status: 'completed',
-      provider: {
-        name: 'Sarah Wilson',
-        rating: 4.7,
-        avatar: undefined
-      },
-      location: '789 Pine St, City',
-      price: 120.00
+  // API Functions
+  const fetchBookings = async (page: number = 1, limit: number = 20) => {
+    try {
+      const url = ApiUtils.buildUrlWithParams(
+        buildApiUrl(API_CONFIG.ENDPOINTS.MARKETPLACE.BOOKINGS.GET_ALL),
+        ApiUtils.paginationParams(page, limit)
+      );
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: getApiHeaders(token || undefined),
+      });
+      
+      const data: ApiResponse<{ bookings: Booking[]; pagination: any }> = await response.json();
+      
+      if (data.success && data.data) {
+        if (page === 1) {
+          setBookings(data.data.bookings || []);
+        } else {
+          setBookings(prev => [...prev, ...(data.data?.bookings || [])]);
+        }
+      } else {
+        throw new Error(data.error || 'Failed to fetch bookings');
+      }
+    } catch (err) {
+      console.error('Error fetching bookings:', err);
+      setError(err instanceof Error ? err.message : 'Failed to fetch bookings');
     }
-  ];
+  };
+
+  const fetchServices = async () => {
+    try {
+      const response = await fetch(
+        buildApiUrl(API_CONFIG.ENDPOINTS.MARKETPLACE.SERVICES.ALL),
+        {
+          method: 'GET',
+          headers: getApiHeaders(token || undefined),
+        }
+      );
+      
+      const data: ApiResponse<{ services: Service[] }> = await response.json();
+      
+      if (data.success && data.data) {
+        setServices(data.data.services || []);
+      } else {
+        throw new Error(data.error || 'Failed to fetch services');
+      }
+    } catch (err) {
+      console.error('Error fetching services:', err);
+      setError(err instanceof Error ? err.message : 'Failed to fetch services');
+    }
+  };
+
+  const loadBookingData = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      await Promise.all([
+        fetchBookings(),
+        fetchServices(),
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadBookingData();
+    setRefreshing(false);
+  };
+
+  useEffect(() => {
+    if (token) {
+      loadBookingData();
+    }
+  }, [token]);
 
   const serviceCategories: ServiceCategory[] = [
     {
@@ -157,18 +227,50 @@ export default function BookingScreen() {
     }
   };
 
-  const handleCreateBooking = () => {
+  const handleCreateBooking = async () => {
     if (!selectedService || !selectedDate || !selectedTime) {
       Alert.alert('Missing Information', 'Please fill in all required fields');
       return;
     }
-    // In a real app, this would call the booking API
-    Alert.alert('Success', 'Booking created successfully!');
-    setShowNewBooking(false);
-    setSelectedService('');
-    setSelectedDate('');
-    setSelectedTime('');
-    setNotes('');
+
+    try {
+      setLoading(true);
+      
+      const response = await fetch(
+        buildApiUrl(API_CONFIG.ENDPOINTS.MARKETPLACE.BOOKINGS.CREATE),
+        {
+          method: 'POST',
+          headers: getApiHeaders(token || undefined),
+          body: JSON.stringify({
+            serviceName: selectedService,
+            date: selectedDate,
+            time: selectedTime,
+            notes: notes,
+            status: 'pending',
+          }),
+        }
+      );
+      
+      const data: ApiResponse<Booking> = await response.json();
+      
+      if (data.success && data.data) {
+        Alert.alert('Success', 'Booking created successfully!');
+        setShowNewBooking(false);
+        setSelectedService('');
+        setSelectedDate('');
+        setSelectedTime('');
+        setNotes('');
+        // Refresh bookings data
+        await loadBookingData();
+      } else {
+        throw new Error(data.error || 'Failed to create booking');
+      }
+    } catch (err) {
+      console.error('Error creating booking:', err);
+      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to create booking');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleCancelBooking = (bookingId: string) => {
@@ -180,13 +282,74 @@ export default function BookingScreen() {
         { 
           text: 'Yes', 
           style: 'destructive',
-          onPress: () => {
-            // In a real app, this would call the cancel API
-            Alert.alert('Success', 'Booking cancelled successfully');
+          onPress: async () => {
+            try {
+              setLoading(true);
+              
+              const response = await fetch(
+                buildApiUrl(API_CONFIG.ENDPOINTS.MARKETPLACE.BOOKINGS.UPDATE_STATUS(bookingId)),
+                {
+                  method: 'PUT',
+                  headers: getApiHeaders(token || undefined),
+                  body: JSON.stringify({
+                    status: 'cancelled',
+                  }),
+                }
+              );
+              
+              const data: ApiResponse<Booking> = await response.json();
+              
+              if (data.success) {
+                Alert.alert('Success', 'Booking cancelled successfully');
+                // Refresh bookings data
+                await loadBookingData();
+              } else {
+                throw new Error(data.error || 'Failed to cancel booking');
+              }
+            } catch (err) {
+              console.error('Error cancelling booking:', err);
+              Alert.alert('Error', err instanceof Error ? err.message : 'Failed to cancel booking');
+            } finally {
+              setLoading(false);
+            }
           }
         }
       ]
     );
+  };
+
+  const handleRescheduleBooking = async (bookingId: string, newDate: string, newTime: string) => {
+    try {
+      setLoading(true);
+      
+      const response = await fetch(
+        buildApiUrl(API_CONFIG.ENDPOINTS.MARKETPLACE.BOOKINGS.UPDATE_STATUS(bookingId)),
+        {
+          method: 'PUT',
+          headers: getApiHeaders(token || undefined),
+          body: JSON.stringify({
+            date: newDate,
+            time: newTime,
+            status: 'pending',
+          }),
+        }
+      );
+      
+      const data: ApiResponse<Booking> = await response.json();
+      
+      if (data.success) {
+        Alert.alert('Success', 'Booking rescheduled successfully');
+        // Refresh bookings data
+        await loadBookingData();
+      } else {
+        throw new Error(data.error || 'Failed to reschedule booking');
+      }
+    } catch (err) {
+      console.error('Error rescheduling booking:', err);
+      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to reschedule booking');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const renderBookingCard = ({ item }: { item: Booking }) => (
@@ -239,7 +402,38 @@ export default function BookingScreen() {
           <View style={styles.bookingActions}>
             <TouchableOpacity 
               style={styles.actionButton}
-              onPress={() => Alert.alert('Reschedule', 'Reschedule functionality coming soon')}
+              onPress={() => {
+                // For now, show a simple alert. In a real app, you'd show a date/time picker
+                Alert.prompt(
+                  'Reschedule Booking',
+                  'Enter new date (YYYY-MM-DD):',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    { 
+                      text: 'OK', 
+                      onPress: (newDate: string | undefined) => {
+                        if (newDate) {
+                          Alert.prompt(
+                            'Reschedule Booking',
+                            'Enter new time (HH:MM AM/PM):',
+                            [
+                              { text: 'Cancel', style: 'cancel' },
+                              { 
+                                text: 'OK', 
+                                onPress: (newTime: string | undefined) => {
+                                  if (newTime) {
+                                    handleRescheduleBooking(item.id, newDate, newTime);
+                                  }
+                                }
+                              }
+                            ]
+                          );
+                        }
+                      }
+                    }
+                  ]
+                );
+              }}
             >
               <Text style={styles.actionButtonText}>Reschedule</Text>
             </TouchableOpacity>
@@ -270,7 +464,7 @@ export default function BookingScreen() {
     </TouchableOpacity>
   );
 
-  if (isLoading) {
+  if (isLoading || loading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
@@ -283,7 +477,13 @@ export default function BookingScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.scrollView} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Bookings</Text>
@@ -295,6 +495,17 @@ export default function BookingScreen() {
             <Text style={styles.newBookingButtonText}>New Booking</Text>
           </TouchableOpacity>
         </View>
+
+        {/* Error Display */}
+        {error && (
+          <View style={styles.errorContainer}>
+            <Ionicons name="alert-circle" size={20} color="#ef4444" />
+            <Text style={styles.errorText}>{error}</Text>
+            <TouchableOpacity onPress={loadBookingData} style={styles.retryButton}>
+              <Text style={styles.retryText}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Service Categories */}
         <View style={styles.section}>
@@ -739,6 +950,34 @@ const styles = StyleSheet.create({
   },
   modalConfirmText: {
     fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  errorContainer: {
+    backgroundColor: '#fef2f2',
+    borderColor: '#fecaca',
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 20,
+    marginBottom: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  errorText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#dc2626',
+    marginLeft: 8,
+  },
+  retryButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#dc2626',
+    borderRadius: 6,
+  },
+  retryText: {
+    fontSize: 12,
     fontWeight: '600',
     color: '#fff',
   },
