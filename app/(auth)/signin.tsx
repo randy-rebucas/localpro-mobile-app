@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -12,15 +12,36 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
+import { getLocationBasedPhoneCountryCode } from '../../utils/locationService';
+import { formatPhoneForDisplay, formatPhoneToInternational, getCountryCodeFromPhone, isValidInternationalPhone } from '../../utils/phoneFormatter';
 
 export default function SignIn() {
   const [phone, setPhone] = useState('');
   const [code, setCode] = useState('');
-  const [name, setName] = useState('');
-  const [userType, setUserType] = useState<'provider' | 'client'>('provider');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [email, setEmail] = useState('');
   const [step, setStep] = useState<'phone' | 'verify'>('phone');
   const [isLoading, setIsLoading] = useState(false);
+  const [detectedCountry, setDetectedCountry] = useState<string | null>(null);
   const { sendVerificationCode, verifyCode } = useAuth();
+
+  // Detect user's location on component mount
+  useEffect(() => {
+    const detectLocation = async () => {
+      try {
+        const countryCode = await getLocationBasedPhoneCountryCode();
+        if (countryCode) {
+          setDetectedCountry(countryCode);
+          console.log('Detected country from location:', countryCode);
+        }
+      } catch (error) {
+        console.log('Location detection failed:', error);
+      }
+    };
+
+    detectLocation();
+  }, []);
 
   const handleSendCode = async () => {
     if (!phone) {
@@ -30,9 +51,30 @@ export default function SignIn() {
 
     setIsLoading(true);
     try {
-      await sendVerificationCode(phone);
+      // Format phone number to international format using location-based detection
+      const formattedPhone = await formatPhoneToInternational(phone);
+      const detectedCountryCode = getCountryCodeFromPhone(phone);
+      
+      console.log('Original phone:', phone);
+      console.log('Detected country code:', detectedCountryCode);
+      console.log('Formatted phone:', formattedPhone);
+      
+      // Check if formatting resulted in empty string
+      if (!formattedPhone) {
+        Alert.alert('Error', 'Please enter a valid phone number');
+        return;
+      }
+      
+      // Validate the formatted phone number
+      if (!isValidInternationalPhone(formattedPhone)) {
+        Alert.alert('Error', 'Please enter a valid phone number');
+        return;
+      }
+
+      await sendVerificationCode(formattedPhone);
       setStep('verify');
     } catch (error) {
+      console.error('Send code error:', error);
       Alert.alert('Error', 'Failed to send verification code');
     } finally {
       setIsLoading(false);
@@ -40,14 +82,23 @@ export default function SignIn() {
   };
 
   const handleVerifyCode = async () => {
-    if (!code || !name) {
+    if (!code || !firstName || !lastName || !email) {
       Alert.alert('Error', 'Please fill in all fields');
+      return;
+    }
+
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      Alert.alert('Error', 'Please enter a valid email address');
       return;
     }
 
     setIsLoading(true);
     try {
-      await verifyCode(phone, code, name, userType);
+      // Format phone number to international format for verification
+      const formattedPhone = await formatPhoneToInternational(phone);
+      await verifyCode(formattedPhone, code, firstName, lastName, email);
     } catch (error) {
       Alert.alert('Error', 'Invalid verification code');
     } finally {
@@ -95,7 +146,7 @@ export default function SignIn() {
                     <Ionicons name="call" size={20} color="#6b7280" style={styles.inputIcon} />
                     <TextInput
                       style={styles.input}
-                      placeholder="Phone Number"
+                      placeholder={detectedCountry ? `Phone Number (e.g., ${detectedCountry} 234 567 8900)` : "Phone Number (e.g., +1 234 567 8900)"}
                       placeholderTextColor="#9ca3af"
                       value={phone}
                       onChangeText={setPhone}
@@ -119,7 +170,10 @@ export default function SignIn() {
                 <View style={styles.infoContainer}>
                   <Ionicons name="information-circle" size={16} color="#6b7280" />
                   <Text style={styles.infoText}>
-                    We'll send you a 6-digit verification code via SMS
+                    {detectedCountry 
+                      ? `We'll send you a 6-digit verification code via SMS. We detected you're in ${detectedCountry.replace('+', '')} region.`
+                      : "We'll send you a 6-digit verification code via SMS. Include country code (e.g., +1 for US)"
+                    }
                   </Text>
                 </View>
               </>
@@ -128,7 +182,7 @@ export default function SignIn() {
                 <View style={styles.titleContainer}>
                   <Text style={styles.title}>Verify Your Phone</Text>
                   <Text style={styles.description}>
-                    Enter the 6-digit code sent to {phone}
+                    Enter the 6-digit code sent to {formatPhoneForDisplay(phone)}
                   </Text>
                 </View>
 
@@ -150,57 +204,38 @@ export default function SignIn() {
                     <Ionicons name="person" size={20} color="#6b7280" style={styles.inputIcon} />
                     <TextInput
                       style={styles.input}
-                      placeholder="Full Name"
+                      placeholder="First Name"
                       placeholderTextColor="#9ca3af"
-                      value={name}
-                      onChangeText={setName}
+                      value={firstName}
+                      onChangeText={setFirstName}
+                      autoCapitalize="words"
                     />
                   </View>
-                </View>
 
-                <View style={styles.userTypeContainer}>
-                  <Text style={styles.userTypeLabel}>I am a:</Text>
-                  <View style={styles.userTypeButtons}>
-                    <TouchableOpacity
-                      style={[
-                        styles.userTypeButton,
-                        userType === 'provider' && styles.userTypeButtonActive
-                      ]}
-                      onPress={() => setUserType('provider')}
-                    >
-                      <Ionicons 
-                        name="construct" 
-                        size={20} 
-                        color={userType === 'provider' ? '#22c55e' : '#6b7280'} 
-                        style={styles.userTypeIcon}
-                      />
-                      <Text style={[
-                        styles.userTypeButtonText,
-                        userType === 'provider' && styles.userTypeButtonTextActive
-                      ]}>
-                        Service Provider
-                      </Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[
-                        styles.userTypeButton,
-                        userType === 'client' && styles.userTypeButtonActive
-                      ]}
-                      onPress={() => setUserType('client')}
-                    >
-                      <Ionicons 
-                        name="person-circle" 
-                        size={20} 
-                        color={userType === 'client' ? '#22c55e' : '#6b7280'} 
-                        style={styles.userTypeIcon}
-                      />
-                      <Text style={[
-                        styles.userTypeButtonText,
-                        userType === 'client' && styles.userTypeButtonTextActive
-                      ]}>
-                        Client
-                      </Text>
-                    </TouchableOpacity>
+                  <View style={styles.inputWrapper}>
+                    <Ionicons name="person" size={20} color="#6b7280" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Last Name"
+                      placeholderTextColor="#9ca3af"
+                      value={lastName}
+                      onChangeText={setLastName}
+                      autoCapitalize="words"
+                    />
+                  </View>
+
+                  <View style={styles.inputWrapper}>
+                    <Ionicons name="mail" size={20} color="#6b7280" style={styles.inputIcon} />
+                    <TextInput
+                      style={styles.input}
+                      placeholder="Email Address"
+                      placeholderTextColor="#9ca3af"
+                      value={email}
+                      onChangeText={setEmail}
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                    />
                   </View>
                 </View>
 

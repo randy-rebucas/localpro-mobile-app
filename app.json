@@ -38,6 +38,12 @@
             "backgroundColor": "#000000"
           }
         }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "This app needs access to location to automatically detect your country for phone number formatting."
+        }
       ]
     ],
     "experiments": {
