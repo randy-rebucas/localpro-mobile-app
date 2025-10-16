@@ -1,4 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   Alert,
@@ -99,6 +100,9 @@ export default function SignIn() {
       // Format phone number to international format for verification
       const formattedPhone = await formatPhoneToInternational(phone);
       await verifyCode(formattedPhone, code, firstName, lastName, email);
+      
+      // Redirect to dashboard after successful verification
+      router.replace('/(tabs)');
     } catch (error) {
       Alert.alert('Error', 'Invalid verification code');
     } finally {
