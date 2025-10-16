@@ -34,78 +34,42 @@ export default function TabLayout() {
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home" size={size} color={color} />
           ),
-          headerTitle: `Welcome, ${user?.name || 'User'}`,
+          headerTitle: `Welcome, ${user?.firstName || 'User'}`,
         }}
       />
       <Tabs.Screen
-        name="marketplace"
+        name="schedule"
         options={{
-          title: 'Marketplace',
+          title: 'Schedule',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="storefront" size={size} color={color} />
+            <Ionicons name="calendar" size={size} color={color} />
           ),
         }}
       />
       <Tabs.Screen
-        name="supplies"
+        name="booking"
         options={{
-          title: 'Supplies',
+          title: 'Booking',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="cube" size={size} color={color} />
+            <Ionicons name="book" size={size} color={color} />
           ),
         }}
       />
       <Tabs.Screen
-        name="academy"
+        name="wallet"
         options={{
-          title: 'Academy',
+          title: 'Wallet',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="school" size={size} color={color} />
+            <Ionicons name="wallet" size={size} color={color} />
           ),
         }}
       />
       <Tabs.Screen
-        name="finance"
+        name="profile"
         options={{
-          title: 'Finance',
+          title: 'Profile',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="card" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="rentals"
-        options={{
-          title: 'Rentals',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="car" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="ads"
-        options={{
-          title: 'Ads',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="megaphone" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="facility-care"
-        options={{
-          title: 'FacilityCare',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="business" size={size} color={color} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="plus"
-        options={{
-          title: 'LocalPro Plus',
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="star" size={size} color={color} />
+            <Ionicons name="person" size={size} color={color} />
           ),
         }}
       />

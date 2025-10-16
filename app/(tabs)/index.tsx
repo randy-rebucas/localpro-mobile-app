@@ -117,7 +117,7 @@ export default function HomeScreen() {
         {/* Welcome Message */}
         <View style={styles.welcomeContainer}>
           <Text style={styles.welcomeText}>
-            Welcome back, {user?.name || 'User'}!
+            Welcome back, {user?.firstName || 'User'}!
           </Text>
           <Text style={styles.subtitleText}>
             Access all your services from one central hub
@@ -133,7 +133,7 @@ export default function HomeScreen() {
               icon={service.icon}
               color={service.color}
               features={service.features}
-              onPress={() => router.push(`/(tabs)/${service.route}`)}
+              onPress={() => router.push(`/(stack)/${service.route}`)}
             />
           ))}
         </View>
