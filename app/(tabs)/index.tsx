@@ -2,34 +2,28 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React from 'react';
 import {
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
 
-interface ServiceCardProps {
+interface ServiceBlockProps {
   title: string;
   icon: keyof typeof Ionicons.glyphMap;
   color: string;
-  features: string[];
   onPress: () => void;
 }
 
-const ServiceCard: React.FC<ServiceCardProps> = ({ title, icon, color, features, onPress }) => (
-  <TouchableOpacity style={styles.serviceCard} onPress={onPress}>
+const ServiceBlock: React.FC<ServiceBlockProps> = ({ title, icon, color, onPress }) => (
+  <TouchableOpacity style={styles.serviceBlock} onPress={onPress}>
     <View style={[styles.iconContainer, { backgroundColor: color }]}>
-      <Ionicons name={icon} size={24} color="white" />
+      <Ionicons name={icon} size={32} color="white" />
     </View>
     <Text style={styles.serviceTitle}>{title}</Text>
-    <View style={styles.featuresContainer}>
-      {features.map((feature, index) => (
-        <Text key={index} style={styles.featureText}>• {feature}</Text>
-      ))}
-    </View>
   </TouchableOpacity>
 );
 
@@ -39,58 +33,50 @@ export default function HomeScreen() {
   const services = [
     {
       title: 'Marketplace',
-      icon: 'shield-checkmark' as keyof typeof Ionicons.glyphMap,
-      color: '#6b7280',
-      features: ['Demand services', 'Cleaning', 'Plumbing', 'Electrical', 'Moving'],
+      icon: 'storefront' as keyof typeof Ionicons.glyphMap,
+      color: '#3b82f6',
       route: 'marketplace',
     },
     {
-      title: 'Supplies & Materials',
+      title: 'Supplies',
       icon: 'cube' as keyof typeof Ionicons.glyphMap,
-      color: '#92400e',
-      features: ['Cleaning supplies', 'Tools', 'Subscription kits'],
+      color: '#f59e0b',
       route: 'supplies',
     },
     {
       title: 'Academy',
       icon: 'school' as keyof typeof Ionicons.glyphMap,
-      color: '#22c55e',
-      features: ['Partner with TES', 'Run courses', 'Certification'],
+      color: '#10b981',
       route: 'academy',
     },
     {
       title: 'Finance',
       icon: 'card' as keyof typeof Ionicons.glyphMap,
-      color: '#22c55e',
-      features: ['Salary advance', 'Micro-loans', 'Partner with fintech'],
+      color: '#8b5cf6',
       route: 'finance',
     },
     {
       title: 'Rentals',
       icon: 'car' as keyof typeof Ionicons.glyphMap,
-      color: '#22c55e',
-      features: ['Tool and vehicle rentals'],
+      color: '#ef4444',
       route: 'rentals',
     },
     {
       title: 'Ads',
       icon: 'megaphone' as keyof typeof Ionicons.glyphMap,
-      color: '#22c55e',
-      features: ['Hardware stores', 'Suppliers', 'Training schools'],
+      color: '#06b6d4',
       route: 'ads',
     },
     {
       title: 'FacilityCare',
       icon: 'business' as keyof typeof Ionicons.glyphMap,
-      color: '#22c55e',
-      features: ['Janitorial contracts', 'Landscaping', 'Pest control'],
+      color: '#84cc16',
       route: 'facility-care',
     },
     {
       title: 'LocalPro Plus',
       icon: 'star' as keyof typeof Ionicons.glyphMap,
       color: '#f59e0b',
-      features: ['Premium subscriptions', 'Providers', 'Clients'],
       route: 'plus',
     },
   ];
@@ -125,35 +111,17 @@ export default function HomeScreen() {
         </View>
 
         {/* Services Grid */}
-        <View style={styles.servicesGrid}>
-          {services.map((service, index) => (
-            <ServiceCard
-              key={index}
-              title={service.title}
-              icon={service.icon}
-              color={service.color}
-              features={service.features}
-              onPress={() => router.push(`/(stack)/${service.route}`)}
-            />
-          ))}
-        </View>
-
-        {/* Quick Actions */}
-        <View style={styles.quickActionsContainer}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
-          <View style={styles.quickActions}>
-            <TouchableOpacity style={styles.quickActionButton}>
-              <Ionicons name="add-circle" size={24} color="#22c55e" />
-              <Text style={styles.quickActionText}>New Service</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.quickActionButton}>
-              <Ionicons name="search" size={24} color="#22c55e" />
-              <Text style={styles.quickActionText}>Search</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.quickActionButton}>
-              <Ionicons name="notifications" size={24} color="#22c55e" />
-              <Text style={styles.quickActionText}>Notifications</Text>
-            </TouchableOpacity>
+        <View style={styles.servicesContainer}>
+          <View style={styles.servicesGrid}>
+            {services.map((service, index) => (
+              <ServiceBlock
+                key={index}
+                title={service.title}
+                icon={service.icon}
+                color={service.color}
+                onPress={() => router.push(`/(stack)/${service.route}` as any)}
+              />
+            ))}
           </View>
         </View>
       </ScrollView>
@@ -226,76 +194,44 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#6b7280',
   },
-  servicesGrid: {
+  servicesContainer: {
     paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+  servicesGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
+    alignItems: 'flex-start',
   },
-  serviceCard: {
+  serviceBlock: {
     width: '48%',
     backgroundColor: 'white',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 16,
+    borderRadius: 20,
+    padding: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 6,
+    height: 140,
+    marginBottom: 16,
   },
   iconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 12,
   },
   serviceTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: '#1f2937',
-    marginBottom: 8,
-  },
-  featuresContainer: {
-    marginTop: 4,
-  },
-  featureText: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginBottom: 2,
-  },
-  quickActionsContainer: {
-    paddingHorizontal: 20,
-    paddingVertical: 24,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1f2937',
-    marginBottom: 16,
-  },
-  quickActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-  },
-  quickActionButton: {
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: 'white',
-    borderRadius: 12,
-    minWidth: 80,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  quickActionText: {
-    fontSize: 12,
-    color: '#6b7280',
-    marginTop: 8,
     textAlign: 'center',
+    lineHeight: 16,
   },
 });

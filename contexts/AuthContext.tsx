@@ -10,7 +10,8 @@ interface User {
   email: string;
   isVerified: boolean;
   role: string;
-  subscription: {
+  avatar?: string;
+  subscription?: {
     isActive: boolean;
     type: string;
   }
@@ -102,6 +103,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       email: userData.email,
       isVerified: userData.isVerified,
       role: userData.role,
+      avatar: userData.avatar,
       subscription: userData.subscription,
     });
     setToken(token);

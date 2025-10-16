@@ -17,7 +17,8 @@ export interface AuthResponse {
     email: string;
     isVerified: boolean;
     role: string;
-    subscription: {
+    avatar?: string;
+    subscription?: {
       isActive: boolean;
       type: string;
     }
