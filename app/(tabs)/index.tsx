@@ -13,17 +13,19 @@ import { useAuth } from '../../contexts/AuthContext';
 
 interface ServiceBlockProps {
   title: string;
+  subtitle: string;
   icon: keyof typeof Ionicons.glyphMap;
   color: string;
   onPress: () => void;
 }
 
-const ServiceBlock: React.FC<ServiceBlockProps> = ({ title, icon, color, onPress }) => (
+const ServiceBlock: React.FC<ServiceBlockProps> = ({ title, subtitle, icon, color, onPress }) => (
   <TouchableOpacity style={styles.serviceBlock} onPress={onPress}>
     <View style={[styles.iconContainer, { backgroundColor: color }]}>
       <Ionicons name={icon} size={32} color="white" />
     </View>
     <Text style={styles.serviceTitle}>{title}</Text>
+    <Text style={styles.serviceSubtitle}>{subtitle}</Text>
   </TouchableOpacity>
 );
 
@@ -33,48 +35,56 @@ export default function HomeScreen() {
   const services = [
     {
       title: 'Marketplace',
+      subtitle: 'Buy & sell locally',
       icon: 'storefront' as keyof typeof Ionicons.glyphMap,
       color: '#3b82f6',
       route: 'marketplace',
     },
     {
       title: 'Supplies',
+      subtitle: 'Equipment & tools',
       icon: 'cube' as keyof typeof Ionicons.glyphMap,
       color: '#f59e0b',
       route: 'supplies',
     },
     {
       title: 'Academy',
+      subtitle: 'Learn & grow',
       icon: 'school' as keyof typeof Ionicons.glyphMap,
       color: '#10b981',
       route: 'academy',
     },
     {
       title: 'Finance',
+      subtitle: 'Manage money',
       icon: 'card' as keyof typeof Ionicons.glyphMap,
       color: '#8b5cf6',
       route: 'finance',
     },
     {
       title: 'Rentals',
+      subtitle: 'Rent equipment',
       icon: 'car' as keyof typeof Ionicons.glyphMap,
       color: '#ef4444',
       route: 'rentals',
     },
     {
       title: 'Ads',
+      subtitle: 'Promote business',
       icon: 'megaphone' as keyof typeof Ionicons.glyphMap,
       color: '#06b6d4',
       route: 'ads',
     },
     {
       title: 'FacilityCare',
+      subtitle: 'Property services',
       icon: 'business' as keyof typeof Ionicons.glyphMap,
       color: '#84cc16',
       route: 'facility-care',
     },
     {
       title: 'LocalPro Plus',
+      subtitle: 'Premium features',
       icon: 'star' as keyof typeof Ionicons.glyphMap,
       color: '#f59e0b',
       route: 'plus',
@@ -117,6 +127,7 @@ export default function HomeScreen() {
               <ServiceBlock
                 key={index}
                 title={service.title}
+                subtitle={service.subtitle}
                 icon={service.icon}
                 color={service.color}
                 onPress={() => router.push(`/(stack)/${service.route}` as any)}
@@ -216,7 +227,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 12,
     elevation: 6,
-    height: 140,
+    height: 160,
     marginBottom: 16,
   },
   iconContainer: {
@@ -231,6 +242,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#1f2937',
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: 4,
+  },
+  serviceSubtitle: {
+    fontSize: 12,
+    color: '#6b7280',
     textAlign: 'center',
     lineHeight: 16,
   },
