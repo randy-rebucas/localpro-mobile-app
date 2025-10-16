@@ -17,7 +17,13 @@ export interface AuthResponse {
     email: string;
     isVerified: boolean;
     role: string;
-    avatar?: string;
+    avatar?: {
+      url: string;
+      publicId: string;
+      thumbnail: string;
+    };
+    bio?: string;
+    createdAt?: string;
     subscription?: {
       isActive: boolean;
       type: string;
@@ -215,6 +221,28 @@ class ApiService {
     return this.request(API_CONFIG.ENDPOINTS.SERVICES.PLUS, {
       method: 'GET',
       headers: token ? getApiHeaders(token) : getApiHeaders(),
+    });
+  }
+
+  // User Statistics Methods
+  async getUserStats(token: string): Promise<ApiResponse> {
+    return this.request('/api/user/stats', {
+      method: 'GET',
+      headers: getApiHeaders(token),
+    });
+  }
+
+  async getUserPortfolio(token: string): Promise<ApiResponse> {
+    return this.request('/api/user/portfolio', {
+      method: 'GET',
+      headers: getApiHeaders(token),
+    });
+  }
+
+  async getUserBookings(token: string): Promise<ApiResponse> {
+    return this.request('/api/user/bookings', {
+      method: 'GET',
+      headers: getApiHeaders(token),
     });
   }
 }

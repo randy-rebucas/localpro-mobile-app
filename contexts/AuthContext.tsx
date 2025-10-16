@@ -10,7 +10,13 @@ interface User {
   email: string;
   isVerified: boolean;
   role: string;
-  avatar?: string;
+  avatar?: {
+    url: string;
+    publicId: string;
+    thumbnail: string;
+  };
+  bio?: string;
+  createdAt?: string;
   subscription?: {
     isActive: boolean;
     type: string;
@@ -29,6 +35,7 @@ interface AuthContextType {
   updateUserProfile: (userData: any) => Promise<void>;
   uploadAvatar: (avatarData: FormData) => Promise<void>;
   uploadPortfolio: (portfolioData: FormData) => Promise<void>;
+  refreshUserData: () => Promise<void>;
   signOut: () => Promise<void>;
 } 
 
@@ -54,14 +61,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const user = JSON.parse(userData);
         const token = tokenData as string;
         
-        // Verify token is still valid
+        // Verify token is still valid and get fresh user data
         try {
-          await apiService.getCurrentUser(token);
-          setUser(user);
-          setToken(token);
+          const response = await apiService.getCurrentUser(token);
+          if (response.success && response.data) {
+            // Update with fresh user data from server
+            const freshUser = response.data;
+            setUser(freshUser);
+            setToken(token);
+            // Update stored user data
+            await AsyncStorage.setItem('user', JSON.stringify(freshUser));
+          } else {
+            // Fallback to cached data if API call fails
+            setUser(user);
+            setToken(token);
+          }
         } catch (error) {
           // Token expired or invalid, clear storage
-          await AsyncStorage.multiRemove(['user', 'tokens']);
+          await AsyncStorage.multiRemove(['user', 'token']);
         }
       }
     } catch (error) {
@@ -103,7 +120,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       email: userData.email,
       isVerified: userData.isVerified,
       role: userData.role,
-      avatar: userData.avatar,
+      avatar: typeof userData.avatar === 'string' 
+        ? { url: userData.avatar, publicId: '', thumbnail: userData.avatar }
+        : userData.avatar,
+      bio: userData.bio,
+      createdAt: userData.createdAt,
       subscription: userData.subscription,
     });
     setToken(token);
@@ -163,6 +184,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const refreshUserData = async () => {
+    if (!token) {
+      throw new Error('No authentication token available');
+    }
+
+    try {
+      const response = await apiService.getCurrentUser(token);
+      if (response.success && response.data) {
+        setUser(response.data);
+        await AsyncStorage.setItem('user', JSON.stringify(response.data));
+      }
+    } catch (error) {
+      console.error('Error refreshing user data:', error);
+      throw error;
+    }
+  };
+
   const signOut = async () => {
     try {
       // Call logout API if we have a token
@@ -188,6 +226,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       updateUserProfile,
       uploadAvatar,
       uploadPortfolio,
+      refreshUserData,
       signOut 
     }}>
       {children}
