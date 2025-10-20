@@ -32,7 +32,7 @@ interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   sendVerificationCode: (phone: string) => Promise<void>;
-  verifyCode: (phone: string, code: string, firstName: string, lastName: string, email?: string) => Promise<void>;
+  verifyCode: (phone: string, code: string, firstName?: string, lastName?: string, email?: string) => Promise<void>;
   updateUserProfile: (userData: any) => Promise<void>;
   uploadAvatar: (avatarData: FormData) => Promise<void>;
   uploadPortfolio: (portfolioData: FormData) => Promise<void>;
@@ -96,17 +96,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const verifyCode = async (phone: string, code: string, firstName: string, lastName: string, email?: string) => {
+  const verifyCode = async (phone: string, code: string, firstName?: string, lastName?: string, email?: string) => {
     const response = await apiService.verifyCode(phone, code, firstName, lastName, email);
     
     console.log('Verify code response:', response);
 
     if (!response || !response.success) {
-      throw new Error(response?.message || 'Invalid verification code');
+      throw new Error(response?.message || response?.error || 'Invalid verification code');
     }
 
     const { user: userData, token } = response as AuthResponse;
     console.log('Verify code response data:', userData, token);
+    
     // Store user data and token
     await Promise.all([
       AsyncStorage.setItem('user', JSON.stringify(userData)),

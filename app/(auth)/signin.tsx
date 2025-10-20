@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -24,8 +24,11 @@ export default function SignIn() {
   const [email, setEmail] = useState('');
   const [step, setStep] = useState<'phone' | 'verify'>('phone');
   const [isLoading, setIsLoading] = useState(false);
+  const [isResending, setIsResending] = useState(false);
   const [detectedCountry, setDetectedCountry] = useState<string | null>(null);
+  const [resendCooldown, setResendCooldown] = useState(0);
   const { sendVerificationCode, verifyCode } = useAuth();
+  const codeInputRef = useRef<TextInput>(null);
 
   // Detect user's location on component mount
   useEffect(() => {
@@ -43,6 +46,16 @@ export default function SignIn() {
 
     detectLocation();
   }, []);
+
+  // Resend cooldown timer
+  useEffect(() => {
+    if (resendCooldown > 0) {
+      const timer = setTimeout(() => {
+        setResendCooldown(resendCooldown - 1);
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [resendCooldown]);
 
   const handleSendCode = async () => {
     if (!phone) {
@@ -74,6 +87,10 @@ export default function SignIn() {
 
       await sendVerificationCode(formattedPhone);
       setStep('verify');
+      // Auto-focus on code input after a short delay
+      setTimeout(() => {
+        codeInputRef.current?.focus();
+      }, 100);
     } catch (error) {
       console.error('Send code error:', error);
       Alert.alert('Error', 'Failed to send verification code');
@@ -83,15 +100,14 @@ export default function SignIn() {
   };
 
   const handleVerifyCode = async () => {
-    if (!code || !firstName || !lastName || !email) {
-      Alert.alert('Error', 'Please fill in all fields');
+    if (!code) {
+      Alert.alert('Error', 'Please enter the verification code');
       return;
     }
 
-    // Basic email validation
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-      Alert.alert('Error', 'Please enter a valid email address');
+    // Validate verification code format (should be 6 digits)
+    if (!/^\d{6}$/.test(code)) {
+      Alert.alert('Error', 'Please enter a valid 6-digit verification code');
       return;
     }
 
@@ -99,14 +115,60 @@ export default function SignIn() {
     try {
       // Format phone number to international format for verification
       const formattedPhone = await formatPhoneToInternational(phone);
-      await verifyCode(formattedPhone, code, firstName, lastName, email);
+      
+      // Validate the formatted phone number
+      if (!formattedPhone || !isValidInternationalPhone(formattedPhone)) {
+        Alert.alert('Error', 'Invalid phone number format');
+        return;
+      }
+
+      // Pass optional user data if provided
+      await verifyCode(
+        formattedPhone, 
+        code, 
+        firstName.trim() || undefined, 
+        lastName.trim() || undefined, 
+        email.trim() || undefined
+      );
       
       // Redirect to dashboard after successful verification
       router.replace('/(tabs)');
     } catch (error) {
-      Alert.alert('Error', 'Invalid verification code');
+      console.error('Verify code error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Invalid verification code';
+      Alert.alert('Error', errorMessage);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleResendCode = async () => {
+    if (resendCooldown > 0) {
+      return;
+    }
+
+    setIsResending(true);
+    try {
+      const formattedPhone = await formatPhoneToInternational(phone);
+      await sendVerificationCode(formattedPhone);
+      setResendCooldown(60); // 60 second cooldown
+      Alert.alert('Success', 'Verification code sent successfully');
+    } catch (error) {
+      console.error('Resend code error:', error);
+      Alert.alert('Error', 'Failed to resend verification code');
+    } finally {
+      setIsResending(false);
+    }
+  };
+
+  const handleCodeChange = (text: string) => {
+    setCode(text);
+    // Auto-submit when 6 digits are entered
+    if (text.length === 6 && !isLoading) {
+      // Use setTimeout to avoid calling handleVerifyCode directly in onChangeText
+      setTimeout(() => {
+        handleVerifyCode();
+      }, 100);
     }
   };
 
@@ -194,13 +256,15 @@ export default function SignIn() {
                   <View style={styles.inputWrapper}>
                     <Ionicons name="keypad" size={20} color="#6b7280" style={styles.inputIcon} />
                     <TextInput
+                      ref={codeInputRef}
                       style={styles.input}
                       placeholder="Verification Code"
                       placeholderTextColor="#9ca3af"
                       value={code}
-                      onChangeText={setCode}
+                      onChangeText={handleCodeChange}
                       keyboardType="number-pad"
                       maxLength={6}
+                      autoFocus={false}
                     />
                   </View>
 
@@ -208,7 +272,7 @@ export default function SignIn() {
                     <Ionicons name="person" size={20} color="#6b7280" style={styles.inputIcon} />
                     <TextInput
                       style={styles.input}
-                      placeholder="First Name"
+                      placeholder="First Name (Optional)"
                       placeholderTextColor="#9ca3af"
                       value={firstName}
                       onChangeText={setFirstName}
@@ -220,7 +284,7 @@ export default function SignIn() {
                     <Ionicons name="person" size={20} color="#6b7280" style={styles.inputIcon} />
                     <TextInput
                       style={styles.input}
-                      placeholder="Last Name"
+                      placeholder="Last Name (Optional)"
                       placeholderTextColor="#9ca3af"
                       value={lastName}
                       onChangeText={setLastName}
@@ -232,7 +296,7 @@ export default function SignIn() {
                     <Ionicons name="mail" size={20} color="#6b7280" style={styles.inputIcon} />
                     <TextInput
                       style={styles.input}
-                      placeholder="Email Address"
+                      placeholder="Email Address (Optional)"
                       placeholderTextColor="#9ca3af"
                       value={email}
                       onChangeText={setEmail}
@@ -254,15 +318,33 @@ export default function SignIn() {
                   <Ionicons name="checkmark" size={20} color="white" style={styles.buttonIcon} />
                 </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={styles.linkButton}
-                  onPress={() => setStep('phone')}
-                >
-                  <Ionicons name="arrow-back" size={16} color="#22c55e" />
-                  <Text style={styles.linkText}>
-                    Change phone number
-                  </Text>
-                </TouchableOpacity>
+                <View style={styles.linkButtonsContainer}>
+                  <TouchableOpacity
+                    style={styles.linkButton}
+                    onPress={() => setStep('phone')}
+                  >
+                    <Ionicons name="arrow-back" size={16} color="#22c55e" />
+                    <Text style={styles.linkText}>
+                      Change phone number
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.linkButton, resendCooldown > 0 && styles.linkButtonDisabled]}
+                    onPress={handleResendCode}
+                    disabled={resendCooldown > 0 || isResending}
+                  >
+                    <Ionicons name="refresh" size={16} color={resendCooldown > 0 ? "#9ca3af" : "#22c55e"} />
+                    <Text style={[styles.linkText, resendCooldown > 0 && styles.linkTextDisabled]}>
+                      {isResending 
+                        ? 'Sending...' 
+                        : resendCooldown > 0 
+                          ? `Resend code (${resendCooldown}s)` 
+                          : 'Resend code'
+                      }
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </>
             )}
           </View>
@@ -466,17 +548,26 @@ const styles = StyleSheet.create({
     color: '#22c55e',
     fontWeight: '600',
   },
+  linkButtonsContainer: {
+    gap: 12,
+  },
   linkButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 12,
   },
+  linkButtonDisabled: {
+    opacity: 0.5,
+  },
   linkText: {
     color: '#22c55e',
     fontSize: 14,
     fontWeight: '500',
     marginLeft: 4,
+  },
+  linkTextDisabled: {
+    color: '#9ca3af',
   },
   footer: {
     paddingHorizontal: 24,

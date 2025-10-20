@@ -111,12 +111,18 @@ class ApiService {
   async verifyCode(
     phone: string,
     code: string,
-    firstName: string,
-    lastName: string,
+    firstName?: string,
+    lastName?: string,
     email?: string
   ): Promise<ApiResponse<AuthResponse>> {
     // Send the phone number as-is (should be in international format)
-    const requestBody: any = { phoneNumber: phone, code, firstName, lastName, email };
+    const requestBody: any = { phoneNumber: phone, code };
+    
+    // Only include optional fields if they are provided
+    if (firstName) requestBody.firstName = firstName;
+    if (lastName) requestBody.lastName = lastName;
+    if (email) requestBody.email = email;
+    
     return this.request(API_CONFIG.ENDPOINTS.AUTH.VERIFY_CODE, {
       method: 'POST',
       body: JSON.stringify(requestBody),
