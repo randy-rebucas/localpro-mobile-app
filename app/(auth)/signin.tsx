@@ -18,7 +18,7 @@ import { formatPhoneForDisplay, formatPhoneToInternational, getCountryCodeFromPh
 
 export default function SignIn() {
   const [phone, setPhone] = useState('');
-  const [code, setCode] = useState('');
+  const [codeDigits, setCodeDigits] = useState(['', '', '', '', '', '']);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
@@ -28,7 +28,7 @@ export default function SignIn() {
   const [detectedCountry, setDetectedCountry] = useState<string | null>(null);
   const [resendCooldown, setResendCooldown] = useState(0);
   const { sendVerificationCode, verifyCode } = useAuth();
-  const codeInputRef = useRef<TextInput>(null);
+  const codeInputRefs = useRef<(TextInput | null)[]>([]);
 
   // Detect user's location on component mount
   useEffect(() => {
@@ -87,26 +87,30 @@ export default function SignIn() {
 
       await sendVerificationCode(formattedPhone);
       setStep('verify');
-      // Auto-focus on code input after a short delay
+      // Auto-focus on first code input after a short delay
       setTimeout(() => {
-        codeInputRef.current?.focus();
+        codeInputRefs.current[0]?.focus();
       }, 100);
     } catch (error) {
       console.error('Send code error:', error);
-      Alert.alert('Error', 'Failed to send verification code');
+      const errorMessage = error instanceof Error ? error.message : 'Failed to send verification code';
+      Alert.alert('Error', errorMessage);
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleVerifyCode = async () => {
-    if (!code) {
+    // Combine the 6 digits into a single code
+    const combinedCode = codeDigits.join('');
+    
+    if (!combinedCode) {
       Alert.alert('Error', 'Please enter the verification code');
       return;
     }
 
     // Validate verification code format (should be 6 digits)
-    if (!/^\d{6}$/.test(code)) {
+    if (!/^\d{6}$/.test(combinedCode)) {
       Alert.alert('Error', 'Please enter a valid 6-digit verification code');
       return;
     }
@@ -125,7 +129,7 @@ export default function SignIn() {
       // Pass optional user data if provided
       await verifyCode(
         formattedPhone, 
-        code, 
+        combinedCode, 
         firstName.trim() || undefined, 
         lastName.trim() || undefined, 
         email.trim() || undefined
@@ -155,20 +159,38 @@ export default function SignIn() {
       Alert.alert('Success', 'Verification code sent successfully');
     } catch (error) {
       console.error('Resend code error:', error);
-      Alert.alert('Error', 'Failed to resend verification code');
+      const errorMessage = error instanceof Error ? error.message : 'Failed to resend verification code';
+      Alert.alert('Error', errorMessage);
     } finally {
       setIsResending(false);
     }
   };
 
-  const handleCodeChange = (text: string) => {
-    setCode(text);
-    // Auto-submit when 6 digits are entered
-    if (text.length === 6 && !isLoading) {
-      // Use setTimeout to avoid calling handleVerifyCode directly in onChangeText
+  const handleDigitChange = (index: number, value: string) => {
+    // Only allow single digit
+    if (value.length > 1) return;
+    
+    const newDigits = [...codeDigits];
+    newDigits[index] = value;
+    setCodeDigits(newDigits);
+    
+    // Auto-focus next input if digit is entered
+    if (value && index < 5) {
+      codeInputRefs.current[index + 1]?.focus();
+    }
+    
+    // Auto-submit when all 6 digits are entered
+    if (newDigits.every(digit => digit !== '') && !isLoading) {
       setTimeout(() => {
         handleVerifyCode();
       }, 100);
+    }
+  };
+
+  const handleDigitKeyPress = (index: number, key: string) => {
+    // Handle backspace - move to previous input if current is empty
+    if (key === 'Backspace' && !codeDigits[index] && index > 0) {
+      codeInputRefs.current[index - 1]?.focus();
     }
   };
 
@@ -253,19 +275,25 @@ export default function SignIn() {
                 </View>
 
                 <View style={styles.inputContainer}>
-                  <View style={styles.inputWrapper}>
-                    <Ionicons name="keypad" size={20} color="#6b7280" style={styles.inputIcon} />
-                    <TextInput
-                      ref={codeInputRef}
-                      style={styles.input}
-                      placeholder="Verification Code"
-                      placeholderTextColor="#9ca3af"
-                      value={code}
-                      onChangeText={handleCodeChange}
-                      keyboardType="number-pad"
-                      maxLength={6}
-                      autoFocus={false}
-                    />
+                  <View style={styles.codeInputContainer}>
+                    {codeDigits.map((digit, index) => (
+                      <TextInput
+                        key={index}
+                        ref={(ref) => {
+                          codeInputRefs.current[index] = ref;
+                        }}
+                        style={styles.codeInput}
+                        placeholder="0"
+                        placeholderTextColor="#9ca3af"
+                        value={digit}
+                        onChangeText={(value) => handleDigitChange(index, value)}
+                        onKeyPress={({ nativeEvent }) => handleDigitKeyPress(index, nativeEvent.key)}
+                        keyboardType="number-pad"
+                        maxLength={1}
+                        textAlign="center"
+                        autoFocus={index === 0}
+                      />
+                    ))}
                   </View>
 
                   <View style={styles.inputWrapper}>
@@ -443,6 +471,24 @@ const styles = StyleSheet.create({
   },
   inputContainer: {
     marginBottom: 24,
+  },
+  codeInputContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+    gap: 12,
+  },
+  codeInput: {
+    width: 48,
+    height: 56,
+    backgroundColor: '#f9fafb',
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: '#e5e7eb',
+    fontSize: 24,
+    fontWeight: '600',
+    color: '#1f2937',
+    textAlign: 'center',
   },
   inputWrapper: {
     flexDirection: 'row',
