@@ -89,14 +89,18 @@ class ApiService {
   // Generic HTTP request method
   private async request<T>(
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    token?: string
   ): Promise<ApiResponse<T>> {
     const url = buildApiUrl(endpoint);
-    const headers = getApiHeaders();
+    const headers = getApiHeaders(token);
 
     // Create AbortController for timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+    const timeoutId = setTimeout(() => {
+      console.log('Request timeout after', this.timeout, 'ms');
+      controller.abort();
+    }, this.timeout);
 
     const config: RequestInit = {
       ...options,
@@ -117,6 +121,19 @@ class ApiService {
     try {
       const response = await fetch(url, config);
       clearTimeout(timeoutId);
+      
+      // Check if response is ok before trying to parse JSON
+      if (!response.ok) {
+        let errorMessage = `HTTP error! status: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.message || errorMessage;
+        } catch (parseError) {
+          console.log('Could not parse error response as JSON');
+        }
+        throw new Error(errorMessage);
+      }
+
       const data = await response.json();
 
       console.log('API Response:', {
@@ -149,9 +166,24 @@ class ApiService {
       }
       
       console.error('API Request failed:', error);
+      
+      // Handle specific error types
+      if (error instanceof Error) {
+        if (error.name === 'AbortError') {
+          return {
+            success: false,
+            error: 'Request timeout - please check your internet connection',
+          };
+        }
+        return {
+          success: false,
+          error: error.message,
+        };
+      }
+      
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Network error',
+        error: 'Network error - please check your internet connection',
       };
     }
   }
@@ -191,54 +223,43 @@ class ApiService {
   async getCurrentUser(token: string): Promise<ApiResponse> {
     return this.request(API_CONFIG.ENDPOINTS.AUTH.ME, {
       method: 'GET',
-      headers: getApiHeaders(token),
-    });
+    }, token);
   }
 
   async updateUserProfile(token: string, userData: any): Promise<ApiResponse> {
     return this.request(API_CONFIG.ENDPOINTS.AUTH.UPDATE_PROFILE, {
       method: 'PUT',
-      headers: getApiHeaders(token),
       body: JSON.stringify(userData),
-    });
+    }, token);
   }
 
   async uploadAvatar(token: string, avatarData: FormData): Promise<ApiResponse> {
     return this.request(API_CONFIG.ENDPOINTS.AUTH.UPLOAD_AVATAR, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${token}`,
         'Content-Type': 'multipart/form-data',
       },
       body: avatarData,
-    });
+    }, token);
   }
 
   async uploadPortfolio(token: string, portfolioData: FormData): Promise<ApiResponse> {
     return this.request(API_CONFIG.ENDPOINTS.AUTH.UPLOAD_PORTFOLIO, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${token}`,
         'Content-Type': 'multipart/form-data',
       },
       body: portfolioData,
-    });
+    }, token);
   }
 
   async logout(token: string): Promise<ApiResponse> {
     return this.request(API_CONFIG.ENDPOINTS.AUTH.LOGOUT, {
       method: 'POST',
-      headers: getApiHeaders(token),
-    });
+    }, token);
   }
 
   // Service Methods
-  async getMarketplaceServices(token?: string): Promise<ApiResponse> {
-    return this.request(API_CONFIG.ENDPOINTS.SERVICES.MARKETPLACE, {
-      method: 'GET',
-      headers: token ? getApiHeaders(token) : getApiHeaders(),
-    });
-  }
 
   async getMarketplaceServiceCategories(token?: string): Promise<ApiResponse> {
     return this.request(API_CONFIG.ENDPOINTS.MARKETPLACE.SERVICES.CATEGORIES, {
@@ -292,72 +313,62 @@ class ApiService {
   async getSupplies(token?: string): Promise<ApiResponse> {
     return this.request(API_CONFIG.ENDPOINTS.SERVICES.SUPPLIES, {
       method: 'GET',
-      headers: token ? getApiHeaders(token) : getApiHeaders(),
-    });
+    }, token);
   }
 
   async getAcademyCourses(token?: string): Promise<ApiResponse> {
     return this.request(API_CONFIG.ENDPOINTS.SERVICES.ACADEMY, {
       method: 'GET',
-      headers: token ? getApiHeaders(token) : getApiHeaders(),
-    });
+    }, token);
   }
 
   async getFinanceData(token: string): Promise<ApiResponse> {
     return this.request(API_CONFIG.ENDPOINTS.SERVICES.FINANCE, {
       method: 'GET',
-      headers: getApiHeaders(token),
-    });
+    }, token);
   }
 
   async getRentals(token?: string): Promise<ApiResponse> {
     return this.request(API_CONFIG.ENDPOINTS.SERVICES.RENTALS, {
       method: 'GET',
-      headers: token ? getApiHeaders(token) : getApiHeaders(),
-    });
+    }, token);
   }
 
   async getAds(token?: string): Promise<ApiResponse> {
     return this.request(API_CONFIG.ENDPOINTS.SERVICES.ADS, {
       method: 'GET',
-      headers: token ? getApiHeaders(token) : getApiHeaders(),
-    });
+    }, token);
   }
 
   async getFacilityCareServices(token?: string): Promise<ApiResponse> {
     return this.request(API_CONFIG.ENDPOINTS.SERVICES.FACILITY_CARE, {
       method: 'GET',
-      headers: token ? getApiHeaders(token) : getApiHeaders(),
-    });
+    }, token);
   }
 
   async getPlusPlans(token?: string): Promise<ApiResponse> {
     return this.request(API_CONFIG.ENDPOINTS.SERVICES.PLUS, {
       method: 'GET',
-      headers: token ? getApiHeaders(token) : getApiHeaders(),
-    });
+    }, token);
   }
 
   // User Statistics Methods
   async getUserStats(token: string): Promise<ApiResponse> {
     return this.request('/api/user/stats', {
       method: 'GET',
-      headers: getApiHeaders(token),
-    });
+    }, token);
   }
 
   async getUserPortfolio(token: string): Promise<ApiResponse> {
     return this.request('/api/user/portfolio', {
       method: 'GET',
-      headers: getApiHeaders(token),
-    });
+    }, token);
   }
 
   async getUserBookings(token: string): Promise<ApiResponse> {
     return this.request('/api/user/bookings', {
       method: 'GET',
-      headers: getApiHeaders(token),
-    });
+    }, token);
   }
 }
 
