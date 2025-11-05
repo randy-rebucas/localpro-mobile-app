@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  FlatList,
   Image,
   Modal,
   RefreshControl,
@@ -18,15 +19,15 @@ import { useAuth } from '../../contexts/AuthContext';
 import { apiService } from '../../services/api';
 
 interface MarketplaceService {
+  _id?: string;
   id: string;
   title: string;
   description: string;
-  price: number;
-  currency?: string;
   category: string;
-  subcategory?: string;
+  subcategory: string;
   provider?: {
-    id: string;
+    _id: string;
+    id?: string;
     firstName: string;
     lastName: string;
     avatar?: {
@@ -34,18 +35,71 @@ interface MarketplaceService {
       thumbnail: string;
     };
   };
+  pricing: {
+    type: 'hourly' | 'fixed' | 'per_sqft' | 'per_item';
+    basePrice: number;
+    currency: string;
+  };
+  availability?: {
+    schedule?: Array<{
+      day: string;
+      startTime: string;
+      endTime: string;
+      isAvailable: boolean;
+    }>;
+    timezone?: string;
+  };
+  serviceArea?: string[]; // Array of zip codes or cities
   images?: Array<{
     url: string;
+    publicId?: string;
     thumbnail: string;
+    alt?: string;
   }>;
+  features?: string[];
+  requirements?: string[];
+  serviceType?: 'one_time' | 'recurring' | 'emergency' | 'maintenance' | 'installation';
+  estimatedDuration?: {
+    min: number; // hours
+    max: number; // hours
+  };
+  teamSize?: number;
+  equipmentProvided?: boolean;
+  materialsIncluded?: boolean;
+  warranty?: {
+    hasWarranty: boolean;
+    duration?: number; // days
+    description?: string;
+  };
+  insurance?: {
+    covered: boolean;
+    coverageAmount?: number;
+  };
+  emergencyService?: {
+    available: boolean;
+    surcharge?: number;
+    responseTime?: string;
+  };
+  servicePackages?: Array<{
+    name: string;
+    description: string;
+    price: number;
+    features: string[];
+    duration: number;
+  }>;
+  addOns?: Array<{
+    name: string;
+    description: string;
+    price: number;
+    category: string;
+  }>;
+  isActive?: boolean;
   rating?: {
     average: number;
-    totalRatings: number;
+    count: number; // Changed from totalRatings to count
   };
-  location?: {
-    city: string;
-    state: string;
-  };
+  createdAt?: string;
+  updatedAt?: string;
   [key: string]: any;
 }
 
@@ -81,6 +135,7 @@ export default function MarketplaceCategoryScreen() {
   // State
   const [services, setServices] = useState<MarketplaceService[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
@@ -101,21 +156,29 @@ export default function MarketplaceCategoryScreen() {
   // Parse subcategories from route params
   const categorySubcategories = subcategories ? JSON.parse(decodeURIComponent(subcategories)) : [];
 
-  // Update header title with category name
+  // Update header title with category name and add back button
   useEffect(() => {
-    if (categoryName) {
-      navigation.setOptions({
-        title: categoryName,
-      });
-    }
-  }, [categoryName, navigation]);
+    navigation.setOptions({
+      title: categoryName || 'Category',
+      headerLeft: () => (
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backButton}
+        >
+          <Ionicons name="arrow-back" size={24} color="#1f2937" />
+        </TouchableOpacity>
+      ),
+    });
+  }, [categoryName, navigation, router]);
 
-  const fetchServices = async (isRefresh = false, page = pagination.page) => {
+  const fetchServices = async (isRefresh = false, page = 1, append = false) => {
     if (!categoryKey) return;
 
     try {
       if (isRefresh) {
         setRefreshing(true);
+      } else if (append) {
+        setLoadingMore(true);
       } else {
         setLoading(true);
       }
@@ -141,37 +204,64 @@ export default function MarketplaceCategoryScreen() {
         const servicesData = Array.isArray(response.data)
           ? response.data
           : response.data.services || response.data.data || [];
-        setServices(servicesData);
+        
+        if (append) {
+          // Append new services for infinite scroll
+          setServices(prev => [...prev, ...servicesData]);
+        } else {
+          // Replace services for refresh or filter change
+          setServices(servicesData);
+        }
         
         // Update pagination from response
-        if (response.pagination) {
+        const paginationData = Array.isArray(response.data)
+          ? undefined
+          : response.data.pagination;
+        if (paginationData) {
           setPagination({
-            page: response.pagination.page || page,
-            limit: response.pagination.limit || pagination.limit,
-            total: response.pagination.total || 0,
-            totalPages: response.pagination.totalPages || 0,
+            page: paginationData.page || page,
+            limit: paginationData.limit || pagination.limit,
+            total: paginationData.total || 0,
+            totalPages: paginationData.totalPages || 0,
           });
         }
       } else {
         setError(response.error || 'Failed to fetch services');
-        setServices([]);
+        if (!append) {
+          setServices([]);
+        }
       }
     } catch (err) {
       console.error('Error fetching marketplace services:', err);
       setError(err instanceof Error ? err.message : 'An error occurred');
-      setServices([]);
+      if (!append) {
+        setServices([]);
+      }
     } finally {
       setLoading(false);
+      setLoadingMore(false);
       setRefreshing(false);
     }
   };
 
   useEffect(() => {
-    fetchServices(false, 1); // Reset to page 1 when filters change
+    // Reset to page 1 when filters or category change
+    setServices([]);
+    setPagination(prev => ({ ...prev, page: 1 }));
+    fetchServices(false, 1, false);
   }, [categoryKey, token, filters]);
 
   const onRefresh = () => {
-    fetchServices(true, pagination.page);
+    setServices([]);
+    setPagination(prev => ({ ...prev, page: 1 }));
+    fetchServices(true, 1, false);
+  };
+
+  const loadMore = () => {
+    if (!loadingMore && !loading && pagination.page < pagination.totalPages) {
+      const nextPage = pagination.page + 1;
+      fetchServices(false, nextPage, true);
+    }
   };
 
   const applyFilters = () => {
@@ -189,91 +279,158 @@ export default function MarketplaceCategoryScreen() {
     setShowFilters(false);
   };
 
-  const changePage = (newPage: number) => {
-    if (newPage >= 1 && newPage <= pagination.totalPages) {
-      fetchServices(false, newPage);
-    }
-  };
 
-  const formatPrice = (price: number, currency: string = 'USD') => {
-    return new Intl.NumberFormat('en-US', {
+  const formatPrice = (service: MarketplaceService) => {
+    const { pricing } = service;
+    const basePrice = pricing?.basePrice || 0;
+    const currency = pricing?.currency || 'USD';
+    const priceFormatted = new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: currency,
       minimumFractionDigits: 0,
       maximumFractionDigits: 2,
-    }).format(price);
+    }).format(basePrice);
+
+    const pricingTypeLabels: Record<string, string> = {
+      hourly: '/hr',
+      fixed: 'fixed',
+      per_sqft: '/sq ft',
+      per_item: '/item',
+    };
+
+    const typeLabel = pricingTypeLabels[pricing?.type || 'fixed'] || '';
+    return `${priceFormatted}${typeLabel ? ` ${typeLabel}` : ''}`;
   };
 
-  const renderServiceCard = (service: MarketplaceService) => (
-    <TouchableOpacity
-      key={service.id}
-      style={styles.serviceCard}
-      onPress={() => {
-        // Navigate to service detail screen when implemented
-        console.log('Navigate to service:', service.id);
-      }}
-    >
-      {service.images && service.images.length > 0 ? (
-        <Image
-          source={{ uri: service.images[0].url }}
-          style={styles.serviceImage}
-          resizeMode="cover"
-        />
-      ) : (
-        <View style={styles.serviceImagePlaceholder}>
-          <Ionicons name="image-outline" size={32} color="#9ca3af" />
+  const renderServiceItem = ({ item: service }: { item: MarketplaceService }) => {
+    const serviceId = service.id || service._id || '';
+    const hasRating = service.rating && service.rating.count > 0;
+    const serviceAreaText = service.serviceArea && service.serviceArea.length > 0 
+      ? service.serviceArea[0] 
+      : null;
+    const duration = service.estimatedDuration 
+      ? `${service.estimatedDuration.min}-${service.estimatedDuration.max}h`
+      : null;
+    const serviceTypeLabels: Record<string, string> = {
+      one_time: 'One-time',
+      recurring: 'Recurring',
+      emergency: 'Emergency',
+      maintenance: 'Maintenance',
+      installation: 'Installation',
+    };
+    const serviceTypeLabel = service.serviceType ? serviceTypeLabels[service.serviceType] || service.serviceType : null;
+
+    return (
+      <TouchableOpacity
+        style={styles.serviceItem}
+        onPress={() => {
+          // Navigate to service detail screen when implemented
+          console.log('Navigate to service:', serviceId);
+        }}
+        activeOpacity={0.7}
+      >
+        <View style={styles.serviceItemImageContainer}>
+          {service.images && service.images.length > 0 ? (
+            <Image
+              source={{ uri: service.images[0].thumbnail || service.images[0].url }}
+              style={styles.serviceItemImage}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={styles.serviceItemImagePlaceholder}>
+              <Ionicons name="image-outline" size={24} color="#9ca3af" />
+            </View>
+          )}
         </View>
-      )}
-      <View style={styles.serviceCardContent}>
-        <Text style={styles.serviceCardTitle} numberOfLines={2}>
-          {service.title}
-        </Text>
-        <Text style={styles.serviceCardDescription} numberOfLines={2}>
-          {service.description}
-        </Text>
-        <View style={styles.serviceCardFooter}>
-          <View style={styles.priceContainer}>
-            <Text style={styles.servicePrice}>
-              {formatPrice(service.price, service.currency)}
+        <View style={styles.serviceItemContent}>
+          <View style={styles.serviceItemHeader}>
+            <Text style={styles.serviceItemTitle} numberOfLines={2}>
+              {service.title}
             </Text>
-            {service.rating && service.rating.totalRatings > 0 && (
-              <View style={styles.ratingContainer}>
-                <Ionicons name="star" size={14} color="#fbbf24" />
-                <Text style={styles.ratingText}>
-                  {service.rating.average.toFixed(1)} ({service.rating.totalRatings})
+            {service.emergencyService?.available && (
+              <View style={styles.emergencyBadge}>
+                <Ionicons name="flash" size={10} color="#ef4444" />
+                <Text style={styles.emergencyBadgeText}>Emergency</Text>
+              </View>
+            )}
+          </View>
+          <Text style={styles.serviceItemDescription} numberOfLines={2}>
+            {service.description}
+          </Text>
+          <View style={styles.serviceItemMeta}>
+            {serviceTypeLabel && (
+              <View style={styles.serviceMetaItem}>
+                <Ionicons name="time-outline" size={12} color="#6b7280" />
+                <Text style={styles.serviceMetaText}>{serviceTypeLabel}</Text>
+              </View>
+            )}
+            {duration && (
+              <View style={styles.serviceMetaItem}>
+                <Ionicons name="hourglass-outline" size={12} color="#6b7280" />
+                <Text style={styles.serviceMetaText}>{duration}</Text>
+              </View>
+            )}
+            {service.teamSize && service.teamSize > 1 && (
+              <View style={styles.serviceMetaItem}>
+                <Ionicons name="people-outline" size={12} color="#6b7280" />
+                <Text style={styles.serviceMetaText}>{service.teamSize} people</Text>
+              </View>
+            )}
+          </View>
+          <View style={styles.serviceItemFooter}>
+            <Text style={styles.serviceItemPrice}>
+              {formatPrice(service)}
+            </Text>
+            {hasRating && (
+              <View style={styles.serviceItemRating}>
+                <Ionicons name="star" size={12} color="#fbbf24" />
+                <Text style={styles.serviceItemRatingText}>
+                  {service.rating!.average.toFixed(1)}
+                </Text>
+                <Text style={styles.serviceItemRatingCount}>
+                  ({service.rating!.count})
                 </Text>
               </View>
             )}
           </View>
-          {service.location && (
-            <View style={styles.locationContainer}>
-              <Ionicons name="location-outline" size={14} color="#6b7280" />
-              <Text style={styles.locationText}>
-                {service.location.city}, {service.location.state}
+          {serviceAreaText && (
+            <View style={styles.serviceItemLocation}>
+              <Ionicons name="location-outline" size={12} color="#6b7280" />
+              <Text style={styles.serviceItemLocationText} numberOfLines={1}>
+                {serviceAreaText}
               </Text>
             </View>
           )}
-        </View>
-        {service.provider && (
-          <View style={styles.providerContainer}>
-            {service.provider.avatar?.thumbnail ? (
-              <Image
-                source={{ uri: service.provider.avatar.thumbnail }}
-                style={styles.providerAvatar}
-              />
-            ) : (
-              <View style={styles.providerAvatarPlaceholder}>
-                <Ionicons name="person" size={16} color="#6b7280" />
+          <View style={styles.serviceItemBadges}>
+            {service.equipmentProvided && (
+              <View style={styles.badge}>
+                <Ionicons name="construct-outline" size={10} color="#22c55e" />
+                <Text style={styles.badgeText}>Equipment</Text>
               </View>
             )}
-            <Text style={styles.providerName}>
-              {service.provider.firstName} {service.provider.lastName}
-            </Text>
+            {service.materialsIncluded && (
+              <View style={styles.badge}>
+                <Ionicons name="cube-outline" size={10} color="#22c55e" />
+                <Text style={styles.badgeText}>Materials</Text>
+              </View>
+            )}
+            {service.warranty?.hasWarranty && (
+              <View style={styles.badge}>
+                <Ionicons name="shield-checkmark-outline" size={10} color="#22c55e" />
+                <Text style={styles.badgeText}>Warranty</Text>
+              </View>
+            )}
+            {service.insurance?.covered && (
+              <View style={styles.badge}>
+                <Ionicons name="shield-outline" size={10} color="#22c55e" />
+                <Text style={styles.badgeText}>Insured</Text>
+              </View>
+            )}
           </View>
-        )}
-      </View>
-    </TouchableOpacity>
-  );
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   const renderFilters = () => (
     <View style={styles.filtersContainer}>
@@ -411,7 +568,7 @@ export default function MarketplaceCategoryScreen() {
             {/* Rating Filter */}
             <View style={styles.filterSection}>
               <Text style={styles.filterLabel}>Minimum Rating</Text>
-              <View style={styles.ratingContainer}>
+              <View style={styles.ratingChipsContainer}>
                 {[4, 3, 2, 1].map((rating) => (
                   <TouchableOpacity
                     key={rating}
@@ -484,100 +641,110 @@ export default function MarketplaceCategoryScreen() {
     </Modal>
   );
 
-  const renderPagination = () => {
-    if (pagination.totalPages <= 1) return null;
+  const renderListHeader = () => (
+    <View>
+      {/* Category Header */}
+      <View style={styles.categoryHeader}>
+        <View style={styles.categoryIconContainer}>
+          <Text style={styles.categoryIcon}>{categoryIcon || '📋'}</Text>
+        </View>
+        <View style={styles.categoryInfo}>
+          <Text style={styles.categoryTitle}>{categoryName || 'Category'}</Text>
+          {categoryDescription && (
+            <Text style={styles.categoryDescription}>{categoryDescription}</Text>
+          )}
+        </View>
+      </View>
 
+      {/* Filters and Sort */}
+      {renderFilters()}
+
+      {/* Services Count */}
+      {services.length > 0 && (
+        <View style={styles.servicesCountContainer}>
+          <Text style={styles.servicesCount}>
+            {pagination.total > 0 ? `${pagination.total} ` : ''}
+            {services.length} {services.length === 1 ? 'service' : 'services'} available
+          </Text>
+        </View>
+      )}
+    </View>
+  );
+
+  const renderListFooter = () => {
+    if (loadingMore) {
+      return (
+        <View style={styles.loadingMoreContainer}>
+          <ActivityIndicator size="small" color="#22c55e" />
+          <Text style={styles.loadingMoreText}>Loading more...</Text>
+        </View>
+      );
+    }
+    if (pagination.page >= pagination.totalPages && services.length > 0) {
+      return (
+        <View style={styles.endOfListContainer}>
+          <Text style={styles.endOfListText}>No more services to load</Text>
+        </View>
+      );
+    }
+    return null;
+  };
+
+  const renderListEmpty = () => {
+    if (loading) {
+      return (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#22c55e" />
+          <Text style={styles.loadingText}>Loading services...</Text>
+        </View>
+      );
+    }
+    if (error) {
+      return (
+        <View style={styles.errorContainer}>
+          <Ionicons name="alert-circle-outline" size={48} color="#dc2626" />
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => {
+              setServices([]);
+              setPagination(prev => ({ ...prev, page: 1 }));
+              fetchServices(false, 1, false);
+            }}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
     return (
-      <View style={styles.paginationContainer}>
-        <TouchableOpacity
-          style={[styles.paginationButton, pagination.page === 1 && styles.paginationButtonDisabled]}
-          onPress={() => changePage(pagination.page - 1)}
-          disabled={pagination.page === 1}
-        >
-          <Ionicons name="chevron-back" size={20} color={pagination.page === 1 ? '#9ca3af' : '#1f2937'} />
-          <Text style={[styles.paginationButtonText, pagination.page === 1 && styles.paginationButtonTextDisabled]}>
-            Previous
-          </Text>
-        </TouchableOpacity>
-
-        <Text style={styles.paginationInfo}>
-          Page {pagination.page} of {pagination.totalPages}
+      <View style={styles.emptyContainer}>
+        <Ionicons name="search-outline" size={64} color="#9ca3af" />
+        <Text style={styles.emptyText}>No services found</Text>
+        <Text style={styles.emptySubtext}>
+          Try adjusting your filters or check back later
         </Text>
-
-        <TouchableOpacity
-          style={[styles.paginationButton, pagination.page === pagination.totalPages && styles.paginationButtonDisabled]}
-          onPress={() => changePage(pagination.page + 1)}
-          disabled={pagination.page === pagination.totalPages}
-        >
-          <Text style={[styles.paginationButtonText, pagination.page === pagination.totalPages && styles.paginationButtonTextDisabled]}>
-            Next
-          </Text>
-          <Ionicons name="chevron-forward" size={20} color={pagination.page === pagination.totalPages ? '#9ca3af' : '#1f2937'} />
-        </TouchableOpacity>
       </View>
     );
   };
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
-      <ScrollView
-        style={styles.scrollView}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-      >
-        {/* Category Header */}
-        <View style={styles.categoryHeader}>
-          <View style={styles.categoryIconContainer}>
-            <Text style={styles.categoryIcon}>{categoryIcon || '📋'}</Text>
-          </View>
-          <View style={styles.categoryInfo}>
-            <Text style={styles.categoryTitle}>{categoryName || 'Category'}</Text>
-            {categoryDescription && (
-              <Text style={styles.categoryDescription}>{categoryDescription}</Text>
-            )}
-          </View>
-        </View>
-
-        {/* Filters and Sort */}
-        {renderFilters()}
-
-        {/* Services List */}
-        <View style={styles.servicesContainer}>
-          {loading && !refreshing ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#22c55e" />
-              <Text style={styles.loadingText}>Loading services...</Text>
-            </View>
-          ) : error && services.length === 0 ? (
-            <View style={styles.errorContainer}>
-              <Ionicons name="alert-circle-outline" size={48} color="#dc2626" />
-              <Text style={styles.errorText}>{error}</Text>
-              <TouchableOpacity
-                style={styles.retryButton}
-                onPress={() => fetchServices()}
-              >
-                <Text style={styles.retryButtonText}>Retry</Text>
-              </TouchableOpacity>
-            </View>
-          ) : services.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Ionicons name="search-outline" size={64} color="#9ca3af" />
-              <Text style={styles.emptyText}>No services found</Text>
-              <Text style={styles.emptySubtext}>
-                Try adjusting your filters or check back later
-              </Text>
-            </View>
-          ) : (
-            <>
-              <Text style={styles.servicesCount}>
-                {pagination.total > 0 ? `${pagination.total} ` : ''}
-                {services.length} {services.length === 1 ? 'service' : 'services'} available
-              </Text>
-              {services.map(renderServiceCard)}
-              {renderPagination()}
-            </>
-          )}
-        </View>
-      </ScrollView>
+      <FlatList
+        data={services}
+        renderItem={renderServiceItem}
+        keyExtractor={(item) => item.id || item._id || Math.random().toString()}
+        ListHeaderComponent={renderListHeader}
+        ListFooterComponent={renderListFooter}
+        ListEmptyComponent={renderListEmpty}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        onEndReached={loadMore}
+        onEndReachedThreshold={0.5}
+        contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
+      />
 
       {/* Filter Modal */}
       {renderFilterModal()}
@@ -590,8 +757,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8fafc',
   },
-  scrollView: {
-    flex: 1,
+  listContent: {
+    paddingBottom: 24,
+  },
+  backButton: {
+    paddingLeft: 16,
+    paddingRight: 8,
+    paddingVertical: 8,
   },
   categoryHeader: {
     flexDirection: 'row',
@@ -681,111 +853,176 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#6b7280',
   },
-  servicesContainer: {
+  servicesCountContainer: {
     paddingHorizontal: 20,
-    paddingBottom: 24,
+    paddingVertical: 12,
+    backgroundColor: 'white',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
   },
   servicesCount: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6b7280',
+  },
+  serviceItem: {
+    flexDirection: 'row',
+    backgroundColor: 'white',
+    padding: 16,
+    marginHorizontal: 20,
+    marginBottom: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  serviceItemImageContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    overflow: 'hidden',
+    marginRight: 12,
+  },
+  serviceItemImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#e5e7eb',
+  },
+  serviceItemImagePlaceholder: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#e5e7eb',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  serviceItemContent: {
+    flex: 1,
+    justifyContent: 'space-between',
+  },
+  serviceItemHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  serviceItemTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: '#1f2937',
-    marginBottom: 16,
+    flex: 1,
+    marginRight: 8,
   },
-  serviceCard: {
-    backgroundColor: 'white',
-    borderRadius: 12,
-    marginBottom: 16,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  serviceImage: {
-    width: '100%',
-    height: 200,
-    backgroundColor: '#e5e7eb',
-  },
-  serviceImagePlaceholder: {
-    width: '100%',
-    height: 200,
-    backgroundColor: '#e5e7eb',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  serviceCardContent: {
-    padding: 16,
-  },
-  serviceCardTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#1f2937',
-    marginBottom: 8,
-  },
-  serviceCardDescription: {
-    fontSize: 14,
-    color: '#6b7280',
-    marginBottom: 12,
-    lineHeight: 20,
-  },
-  serviceCardFooter: {
-    marginBottom: 12,
-  },
-  priceContainer: {
+  emergencyBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    backgroundColor: '#fef2f2',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    gap: 2,
   },
-  servicePrice: {
-    fontSize: 20,
+  emergencyBadgeText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#ef4444',
+  },
+  serviceItemMeta: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 6,
+  },
+  serviceMetaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  serviceMetaText: {
+    fontSize: 11,
+    color: '#6b7280',
+  },
+  serviceItemDescription: {
+    fontSize: 13,
+    color: '#6b7280',
+    marginBottom: 8,
+    lineHeight: 18,
+  },
+  serviceItemFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  serviceItemPrice: {
+    fontSize: 16,
     fontWeight: 'bold',
     color: '#22c55e',
-    marginRight: 12,
   },
-  ratingContainer: {
+  serviceItemRating: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 2,
   },
-  ratingText: {
-    fontSize: 14,
+  serviceItemRatingText: {
+    fontSize: 12,
     color: '#6b7280',
-    marginLeft: 4,
+    fontWeight: '500',
   },
-  locationContainer: {
+  serviceItemRatingCount: {
+    fontSize: 11,
+    color: '#9ca3af',
+  },
+  serviceItemLocation: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  locationText: {
+  serviceItemLocationText: {
     fontSize: 12,
     color: '#6b7280',
     marginLeft: 4,
+    flex: 1,
   },
-  providerContainer: {
+  serviceItemBadges: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8,
+  },
+  badge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
+    backgroundColor: '#f0fdf4',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 4,
+    gap: 3,
   },
-  providerAvatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    marginRight: 8,
+  badgeText: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: '#22c55e',
   },
-  providerAvatarPlaceholder: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#e5e7eb',
-    justifyContent: 'center',
+  loadingMoreContainer: {
+    paddingVertical: 20,
     alignItems: 'center',
-    marginRight: 8,
+    justifyContent: 'center',
   },
-  providerName: {
+  loadingMoreText: {
+    marginTop: 8,
     fontSize: 14,
     color: '#6b7280',
+  },
+  endOfListContainer: {
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  endOfListText: {
+    fontSize: 14,
+    color: '#9ca3af',
   },
   loadingContainer: {
     alignItems: 'center',
@@ -928,7 +1165,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: '#6b7280',
   },
-  ratingContainer: {
+  ratingChipsContainer: {
     flexDirection: 'row',
     gap: 8,
   },
@@ -1010,38 +1247,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: 'white',
-  },
-  paginationContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 24,
-    paddingVertical: 16,
-  },
-  paginationButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
-    backgroundColor: 'white',
-  },
-  paginationButtonDisabled: {
-    opacity: 0.5,
-  },
-  paginationButtonText: {
-    marginLeft: 4,
-    fontSize: 14,
-    color: '#1f2937',
-  },
-  paginationButtonTextDisabled: {
-    color: '#9ca3af',
-  },
-  paginationInfo: {
-    fontSize: 14,
-    color: '#6b7280',
-    fontWeight: '500',
   },
 });
