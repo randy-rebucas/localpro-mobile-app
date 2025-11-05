@@ -1,13 +1,13 @@
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
 import {
-    SafeAreaView,
     ScrollView,
     StyleSheet,
     Text,
     TouchableOpacity,
     View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 interface RentalItemProps {
   title: string;
@@ -70,7 +70,7 @@ export default function RentalsScreen() {
   ];
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={[]}>
       <ScrollView style={styles.scrollView}>
         <View style={styles.header}>
           <Text style={styles.title}>Rentals</Text>

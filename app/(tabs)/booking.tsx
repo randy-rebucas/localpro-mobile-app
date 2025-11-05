@@ -466,7 +466,7 @@ export default function BookingScreen() {
 
   if (isLoading || loading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={[]}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#3b82f6" />
           <Text style={styles.loadingText}>Loading bookings...</Text>
@@ -476,7 +476,7 @@ export default function BookingScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={[]}>
       <ScrollView 
         style={styles.scrollView} 
         showsVerticalScrollIndicator={false}

@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_CONFIG, buildApiUrl, getApiHeaders } from '../config/api';
 
 // API Response Types
@@ -6,6 +7,14 @@ export interface ApiResponse<T = any> {
   data?: T;
   message?: string;
   error?: string;
+}
+
+// Custom error class for token expiration
+export class TokenExpiredError extends Error {
+  constructor(message: string = 'Token has expired') {
+    super(message);
+    this.name = 'TokenExpiredError';
+  }
 }
 
 export interface AuthResponse {
@@ -42,6 +51,39 @@ class ApiService {
   constructor() {
     this.baseUrl = API_CONFIG.BASE_URL;
     this.timeout = API_CONFIG.TIMEOUT;
+  }
+
+  // Helper method to check if error indicates token expiration
+  private isTokenExpired(status: number, message?: string): boolean {
+    // Check for 401 Unauthorized status
+    if (status === 401) {
+      return true;
+    }
+    
+    // Check for token-related error messages
+    if (message) {
+      const lowerMessage = message.toLowerCase();
+      return (
+        lowerMessage.includes('token is not valid') ||
+        lowerMessage.includes('token expired') ||
+        lowerMessage.includes('invalid token') ||
+        lowerMessage.includes('token has expired') ||
+        lowerMessage.includes('unauthorized') ||
+        lowerMessage.includes('authentication failed')
+      );
+    }
+    
+    return false;
+  }
+
+  // Helper method to clear auth data on token expiration
+  private async clearAuthData(): Promise<void> {
+    try {
+      await AsyncStorage.multiRemove(['user', 'token']);
+      console.log('Auth data cleared due to token expiration');
+    } catch (error) {
+      console.error('Error clearing auth data:', error);
+    }
   }
 
   // Generic HTTP request method
@@ -83,12 +125,29 @@ class ApiService {
       });
 
       if (!response.ok) {
-        throw new Error(data.message || `HTTP error! status: ${response.status}`);
+        const errorMessage = data.message || `HTTP error! status: ${response.status}`;
+        
+        // Check if token has expired
+        if (this.isTokenExpired(response.status, errorMessage)) {
+          // Clear auth data
+          await this.clearAuthData();
+          // Throw a TokenExpiredError that can be caught by calling code
+          throw new TokenExpiredError(errorMessage);
+        }
+        
+        throw new Error(errorMessage);
       }
 
       return data;
     } catch (error) {
       clearTimeout(timeoutId);
+      
+      // Re-throw TokenExpiredError so it can be handled by calling code
+      if (error instanceof TokenExpiredError) {
+        console.error('Token expired error:', error.message);
+        throw error;
+      }
+      
       console.error('API Request failed:', error);
       return {
         success: false,
@@ -179,6 +238,55 @@ class ApiService {
       method: 'GET',
       headers: token ? getApiHeaders(token) : getApiHeaders(),
     });
+  }
+
+  async getMarketplaceServiceCategories(token?: string): Promise<ApiResponse> {
+    return this.request(API_CONFIG.ENDPOINTS.MARKETPLACE.SERVICES.CATEGORIES, {
+      method: 'GET',
+      headers: token ? getApiHeaders(token) : getApiHeaders(),
+    });
+  }
+
+  async getMarketplaceServices(
+    filters?: {
+      category?: string;
+      subcategory?: string;
+      location?: string;
+      minPrice?: number;
+      maxPrice?: number;
+      rating?: number;
+      page?: number;
+      limit?: number;
+      sortBy?: string;
+      sortOrder?: 'asc' | 'desc';
+      groupByCategory?: boolean;
+    },
+    token?: string
+  ): Promise<ApiResponse> {
+    const params = new URLSearchParams();
+    
+    if (filters?.category) params.append('category', filters.category);
+    if (filters?.subcategory) params.append('subcategory', filters.subcategory);
+    if (filters?.location) params.append('location', filters.location);
+    if (filters?.minPrice !== undefined) params.append('minPrice', filters.minPrice.toString());
+    if (filters?.maxPrice !== undefined) params.append('maxPrice', filters.maxPrice.toString());
+    if (filters?.rating !== undefined) params.append('rating', filters.rating.toString());
+    if (filters?.page !== undefined) params.append('page', filters.page.toString());
+    if (filters?.limit !== undefined) params.append('limit', filters.limit.toString());
+    if (filters?.sortBy) params.append('sortBy', filters.sortBy);
+    if (filters?.sortOrder) params.append('sortOrder', filters.sortOrder);
+    if (filters?.groupByCategory !== undefined) params.append('groupByCategory', filters.groupByCategory.toString());
+
+    const endpoint = `${API_CONFIG.ENDPOINTS.MARKETPLACE.SERVICES.ALL}${params.toString() ? `?${params.toString()}` : ''}`;
+    return this.request(endpoint, {
+      method: 'GET',
+      headers: token ? getApiHeaders(token) : getApiHeaders(),
+    });
+  }
+
+  // Legacy method for backward compatibility
+  async getMarketplaceServicesByCategory(categoryKey: string, token?: string): Promise<ApiResponse> {
+    return this.getMarketplaceServices({ category: categoryKey }, token);
   }
 
   async getSupplies(token?: string): Promise<ApiResponse> {

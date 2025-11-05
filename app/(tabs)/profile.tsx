@@ -266,7 +266,7 @@ export default function ProfileScreen() {
 
   if (isLoading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={[]}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#3b82f6" />
           <Text style={styles.loadingText}>Loading profile...</Text>
@@ -277,7 +277,7 @@ export default function ProfileScreen() {
 
   if (!user) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={[]}>
         <View style={styles.errorContainer}>
           <Ionicons name="person-outline" size={64} color="#6b7280" />
           <Text style={styles.errorTitle}>No User Data</Text>
@@ -288,7 +288,7 @@ export default function ProfileScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={[]}>
       <ScrollView 
         style={styles.scrollView} 
         showsVerticalScrollIndicator={false}

@@ -110,7 +110,7 @@ export default function PaymentMethodsSettings() {
       presentationStyle="pageSheet"
       onRequestClose={() => router.back()}
     >
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={[]}>
         <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>

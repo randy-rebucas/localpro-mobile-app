@@ -20,6 +20,7 @@ export const API_CONFIG = {
         NEARBY: '/api/marketplace/services/nearby',
         BY_ID: (id: string) => `/api/marketplace/services/${id}`,
         UPLOAD_IMAGES: (id: string) => `/api/marketplace/services/${id}/images`,
+        CATEGORIES: '/api/marketplace/services/categories',
       },
       BOOKINGS: {
         CREATE: '/api/marketplace/bookings',

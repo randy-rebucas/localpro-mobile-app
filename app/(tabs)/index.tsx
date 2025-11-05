@@ -1,15 +1,26 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  SafeAreaView,
+  Image,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { API_CONFIG, buildApiUrl, getApiHeaders } from '../../config/api';
 import { useAuth } from '../../contexts/AuthContext';
+
+interface FinanceOverview {
+  balance: number;
+  monthlyEarnings: number;
+  monthlyExpenses: number;
+  totalEarnings: number;
+  totalExpenses: number;
+  pendingAmount: number;
+}
 
 interface ServiceBlockProps {
   title: string;
@@ -30,7 +41,34 @@ const ServiceBlock: React.FC<ServiceBlockProps> = ({ title, subtitle, icon, colo
 );
 
 export default function HomeScreen() {
-  const { user, signOut } = useAuth();
+  const { user, token } = useAuth();
+  const [balance, setBalance] = useState<number | null>(null);
+
+  useEffect(() => {
+    const fetchBalance = async () => {
+      if (!token) return;
+      
+      try {
+        const response = await fetch(
+          buildApiUrl(API_CONFIG.ENDPOINTS.FINANCE.OVERVIEW),
+          {
+            method: 'GET',
+            headers: getApiHeaders(token),
+          }
+        );
+        
+        const data = await response.json();
+        
+        if (data.success && data.data) {
+          setBalance(data.data.balance);
+        }
+      } catch (error) {
+        console.error('Error fetching balance:', error);
+      }
+    };
+
+    fetchBalance();
+  }, [token]);
 
   const services = [
     {
@@ -92,21 +130,43 @@ export default function HomeScreen() {
   ];
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={[]}>
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={styles.header}>
-          <View style={styles.logoContainer}>
-            <View style={styles.logo}>
-              <Text style={styles.logoText}>P</Text>
+          <View style={styles.userInfoContainer}>
+            <View style={styles.avatarContainer}>
+              {user?.avatar?.url ? (
+                <Image 
+                  source={{ uri: user.avatar.url }} 
+                  style={styles.avatarImage}
+                />
+              ) : (
+                <View style={styles.avatarPlaceholder}>
+                  <Ionicons name="person" size={24} color="#6b7280" />
+                </View>
+              )}
             </View>
-            <View style={styles.logoTextContainer}>
-              <Text style={styles.appName}>LocalPro</Text>
-              <Text style={styles.subtitle}>Super App</Text>
+            <View style={styles.userTextContainer}>
+              <Text style={styles.userName}>
+                {[user?.firstName, user?.lastName].filter(Boolean).join(' ') || 'User'}
+              </Text>
+              <Text style={styles.userPhone}>
+                {user?.phoneNumber || 'No phone number'}
+              </Text>
             </View>
           </View>
-          <TouchableOpacity style={styles.signOutButton} onPress={signOut}>
-            <Ionicons name="log-out-outline" size={24} color="#6b7280" />
+          <TouchableOpacity 
+            style={styles.walletContainer} 
+            onPress={() => router.push('/(tabs)/wallet')}
+          >
+            <View style={styles.walletInfo}>
+              <Text style={styles.balanceLabel}>Balance</Text>
+              <Text style={styles.balanceAmount}>
+                ${balance !== null ? balance.toFixed(2) : '0.00'}
+              </Text>
+            </View>
+            <Ionicons name="wallet" size={24} color="#22c55e" />
           </TouchableOpacity>
         </View>
 
@@ -158,38 +218,69 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#e5e7eb',
   },
-  logoContainer: {
+  userInfoContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
   },
-  logo: {
+  avatarContainer: {
     width: 50,
     height: 50,
-    borderRadius: 12,
-    backgroundColor: '#22c55e',
+    borderRadius: 25,
+    backgroundColor: '#f3f4f6',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
+    overflow: 'hidden',
   },
-  logoText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: 'white',
+  avatarImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
   },
-  logoTextContainer: {
-    alignItems: 'flex-start',
+  avatarPlaceholder: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  appName: {
-    fontSize: 20,
-    fontWeight: 'bold',
+  userTextContainer: {
+    flex: 1,
+  },
+  userName: {
+    fontSize: 16,
+    fontWeight: '600',
     color: '#1f2937',
+    marginBottom: 2,
   },
-  subtitle: {
+  userPhone: {
     fontSize: 14,
     color: '#6b7280',
   },
-  signOutButton: {
-    padding: 8,
+  walletContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#f0fdf4',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#dcfce7',
+  },
+  walletInfo: {
+    alignItems: 'flex-end',
+  },
+  balanceLabel: {
+    fontSize: 10,
+    color: '#6b7280',
+    marginBottom: 2,
+  },
+  balanceAmount: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#22c55e',
   },
   welcomeContainer: {
     paddingHorizontal: 20,

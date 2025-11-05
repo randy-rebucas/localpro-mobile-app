@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   ScrollView,
   StyleSheet,
@@ -14,7 +15,46 @@ import {
 } from 'react-native';
 import { useAuth } from '../../contexts/AuthContext';
 import { getLocationBasedPhoneCountryCode } from '../../utils/locationService';
-import { formatPhoneForDisplay, formatPhoneToInternational, getCountryCodeFromPhone, isValidInternationalPhone } from '../../utils/phoneFormatter';
+import { formatPhoneForDisplay, formatPhoneToInternational, isValidInternationalPhone } from '../../utils/phoneFormatter';
+
+// Country list with phone codes
+const COUNTRIES = [
+    { code: 'US', name: 'United States', phoneCode: '+1', flag: '🇺🇸' },
+    { code: 'CA', name: 'Canada', phoneCode: '+1', flag: '🇨🇦' },
+    { code: 'PH', name: 'Philippines', phoneCode: '+63', flag: '🇵🇭' },
+    { code: 'GB', name: 'United Kingdom', phoneCode: '+44', flag: '🇬🇧' },
+    { code: 'AU', name: 'Australia', phoneCode: '+61', flag: '🇦🇺' },
+    { code: 'DE', name: 'Germany', phoneCode: '+49', flag: '🇩🇪' },
+    { code: 'FR', name: 'France', phoneCode: '+33', flag: '🇫🇷' },
+    { code: 'IT', name: 'Italy', phoneCode: '+39', flag: '🇮🇹' },
+    { code: 'ES', name: 'Spain', phoneCode: '+34', flag: '🇪🇸' },
+    { code: 'NL', name: 'Netherlands', phoneCode: '+31', flag: '🇳🇱' },
+    { code: 'SE', name: 'Sweden', phoneCode: '+46', flag: '🇸🇪' },
+    { code: 'NO', name: 'Norway', phoneCode: '+47', flag: '🇳🇴' },
+    { code: 'DK', name: 'Denmark', phoneCode: '+45', flag: '🇩🇰' },
+    { code: 'CH', name: 'Switzerland', phoneCode: '+41', flag: '🇨🇭' },
+    { code: 'AT', name: 'Austria', phoneCode: '+43', flag: '🇦🇹' },
+    { code: 'CN', name: 'China', phoneCode: '+86', flag: '🇨🇳' },
+    { code: 'JP', name: 'Japan', phoneCode: '+81', flag: '🇯🇵' },
+    { code: 'KR', name: 'South Korea', phoneCode: '+82', flag: '🇰🇷' },
+    { code: 'IN', name: 'India', phoneCode: '+91', flag: '🇮🇳' },
+    { code: 'SG', name: 'Singapore', phoneCode: '+65', flag: '🇸🇬' },
+    { code: 'MY', name: 'Malaysia', phoneCode: '+60', flag: '🇲🇾' },
+    { code: 'TH', name: 'Thailand', phoneCode: '+66', flag: '🇹🇭' },
+    { code: 'VN', name: 'Vietnam', phoneCode: '+84', flag: '🇻🇳' },
+    { code: 'ID', name: 'Indonesia', phoneCode: '+62', flag: '🇮🇩' },
+    { code: 'AE', name: 'UAE', phoneCode: '+971', flag: '🇦🇪' },
+    { code: 'SA', name: 'Saudi Arabia', phoneCode: '+966', flag: '🇸🇦' },
+    { code: 'EG', name: 'Egypt', phoneCode: '+20', flag: '🇪🇬' },
+    { code: 'ZA', name: 'South Africa', phoneCode: '+27', flag: '🇿🇦' },
+    { code: 'NG', name: 'Nigeria', phoneCode: '+234', flag: '🇳🇬' },
+    { code: 'KE', name: 'Kenya', phoneCode: '+254', flag: '🇰🇪' },
+    { code: 'BR', name: 'Brazil', phoneCode: '+55', flag: '🇧🇷' },
+    { code: 'MX', name: 'Mexico', phoneCode: '+52', flag: '🇲🇽' },
+    { code: 'AR', name: 'Argentina', phoneCode: '+54', flag: '🇦🇷' },
+    { code: 'CL', name: 'Chile', phoneCode: '+56', flag: '🇨🇱' },
+    { code: 'CO', name: 'Colombia', phoneCode: '+57', flag: '🇨🇴' },
+  ];
 
 export default function SignIn() {
   const [phone, setPhone] = useState('');
@@ -27,8 +67,19 @@ export default function SignIn() {
   const [isResending, setIsResending] = useState(false);
   const [detectedCountry, setDetectedCountry] = useState<string | null>(null);
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [showCountryPicker, setShowCountryPicker] = useState(false);
+  const [countrySearchQuery, setCountrySearchQuery] = useState('');
+  const [selectedCountryName, setSelectedCountryName] = useState<string | null>(null);
   const { sendVerificationCode, verifyCode } = useAuth();
   const codeInputRef = useRef<TextInput>(null);
+  const phoneInputRef = useRef<TextInput>(null);
+
+  // Filter countries based on search query
+  const filteredCountries = COUNTRIES.filter(country =>
+    country.name.toLowerCase().includes(countrySearchQuery.toLowerCase()) ||
+    country.phoneCode.includes(countrySearchQuery) ||
+    country.code.toLowerCase().includes(countrySearchQuery.toLowerCase())
+  );
 
   // Detect user's location on component mount
   useEffect(() => {
@@ -37,6 +88,11 @@ export default function SignIn() {
         const countryCode = await getLocationBasedPhoneCountryCode();
         if (countryCode) {
           setDetectedCountry(countryCode);
+          // Find and set country name
+          const country = COUNTRIES.find(c => c.phoneCode === countryCode);
+          if (country) {
+            setSelectedCountryName(country.name);
+          }
           console.log('Detected country from location:', countryCode);
         }
       } catch (error) {
@@ -46,6 +102,74 @@ export default function SignIn() {
 
     detectLocation();
   }, []);
+
+  // Handle country selection
+  const handleCountrySelect = (country: typeof COUNTRIES[0]) => {
+    // Set the selected country code (this will be used for automatic prefix)
+    setDetectedCountry(country.phoneCode);
+    setSelectedCountryName(country.name);
+    setShowCountryPicker(false);
+    setCountrySearchQuery('');
+    
+    // If phone number already exists, reformat it with new country code
+    if (phone) {
+      const digitsOnly = phone.replace(/\D/g, '').replace(/^\+?/, '');
+      let phoneNumber = digitsOnly;
+      
+      // Check if number starts with any country code from our list and remove it
+      for (const c of COUNTRIES) {
+        const codeDigits = c.phoneCode.replace('+', '');
+        if (digitsOnly.startsWith(codeDigits)) {
+          phoneNumber = digitsOnly.substring(codeDigits.length);
+          break;
+        }
+      }
+      
+      // Apply new country code prefix
+      setPhone(country.phoneCode + phoneNumber);
+    } else {
+      // Clear phone input when country changes if no number entered yet
+      // This ensures the new country code will be auto-added when user starts typing
+      setPhone('');
+    }
+  };
+
+  // Handle phone number input with automatic formatting
+  const handlePhoneChange = (text: string) => {
+    // Remove all spaces and non-digit characters except the leading +
+    let cleaned = text.replace(/\s/g, '').replace(/[^\d+]/g, '');
+    
+    // If empty or just +, reset to empty string
+    if (cleaned === '' || cleaned === '+') {
+      setPhone('');
+      return;
+    }
+
+    // If user manually types +, respect it and let them type the full number
+    if (cleaned.startsWith('+')) {
+      // Remove any duplicate + signs, keep only one at the start
+      cleaned = '+' + cleaned.substring(1).replace(/\+/g, '');
+      setPhone(cleaned);
+      return;
+    }
+
+    // If user types without +, and we have detected country, auto-add country code prefix
+    if (detectedCountry) {
+      const countryDigits = detectedCountry.replace('+', '');
+      // Check if user already typed the country code digits at the start
+      if (cleaned.startsWith(countryDigits)) {
+        // User is typing with country code, just add + prefix
+        setPhone('+' + cleaned);
+      } else {
+        // User is typing local number, prepend detected country code
+        setPhone(detectedCountry + cleaned);
+      }
+    } else {
+      // No detected country, let user type and we'll format on submit
+      // But still add + prefix to indicate international format
+      setPhone('+' + cleaned);
+    }
+  };
 
   // Resend cooldown timer
   useEffect(() => {
@@ -58,34 +182,49 @@ export default function SignIn() {
   }, [resendCooldown]);
 
   const handleSendCode = async () => {
-    if (!phone) {
+    if (!phone || phone.trim() === '') {
       Alert.alert('Error', 'Please enter your phone number');
       return;
     }
 
     setIsLoading(true);
     try {
-      // Format phone number to international format using location-based detection
-      const formattedPhone = await formatPhoneToInternational(phone);
-      const detectedCountryCode = getCountryCodeFromPhone(phone);
+      // Remove all spaces and ensure proper formatting
+      let cleanedPhone = phone.replace(/\s/g, '').trim();
+      
+      // If phone doesn't start with +, add detected country code or format
+      if (!cleanedPhone.startsWith('+')) {
+        if (detectedCountry) {
+          // Prepend detected country code
+          cleanedPhone = detectedCountry + cleanedPhone.replace(/^\+?/, '');
+        } else {
+          // Use formatter to detect and add country code
+          cleanedPhone = await formatPhoneToInternational(cleanedPhone);
+        }
+      } else {
+        // Already has +, but ensure no spaces and validate
+        cleanedPhone = cleanedPhone.replace(/\s/g, '');
+      }
       
       console.log('Original phone:', phone);
-      console.log('Detected country code:', detectedCountryCode);
-      console.log('Formatted phone:', formattedPhone);
+      console.log('Cleaned phone:', cleanedPhone);
       
       // Check if formatting resulted in empty string
-      if (!formattedPhone) {
+      if (!cleanedPhone || cleanedPhone === '+') {
         Alert.alert('Error', 'Please enter a valid phone number');
         return;
       }
       
       // Validate the formatted phone number
-      if (!isValidInternationalPhone(formattedPhone)) {
-        Alert.alert('Error', 'Please enter a valid phone number');
+      if (!isValidInternationalPhone(cleanedPhone)) {
+        Alert.alert('Error', 'Please enter a valid phone number with country code');
         return;
       }
 
-      await sendVerificationCode(formattedPhone);
+      // Update phone state with formatted version (no spaces)
+      setPhone(cleanedPhone);
+      
+      await sendVerificationCode(cleanedPhone);
       setStep('verify');
       // Auto-focus on code input after a short delay
       setTimeout(() => {
@@ -113,8 +252,17 @@ export default function SignIn() {
 
     setIsLoading(true);
     try {
-      // Format phone number to international format for verification
-      const formattedPhone = await formatPhoneToInternational(phone);
+      // Ensure phone is properly formatted (no spaces, with country code)
+      let formattedPhone = phone.replace(/\s/g, '').trim();
+      
+      // If phone doesn't start with +, add detected country code
+      if (!formattedPhone.startsWith('+')) {
+        if (detectedCountry) {
+          formattedPhone = detectedCountry + formattedPhone.replace(/^\+?/, '');
+        } else {
+          formattedPhone = await formatPhoneToInternational(formattedPhone);
+        }
+      }
       
       // Validate the formatted phone number
       if (!formattedPhone || !isValidInternationalPhone(formattedPhone)) {
@@ -149,7 +297,17 @@ export default function SignIn() {
 
     setIsResending(true);
     try {
-      const formattedPhone = await formatPhoneToInternational(phone);
+      // Ensure phone is properly formatted (no spaces, with country code)
+      let formattedPhone = phone.replace(/\s/g, '').trim();
+      
+      if (!formattedPhone.startsWith('+')) {
+        if (detectedCountry) {
+          formattedPhone = detectedCountry + formattedPhone.replace(/^\+?/, '');
+        } else {
+          formattedPhone = await formatPhoneToInternational(formattedPhone);
+        }
+      }
+      
       await sendVerificationCode(formattedPhone);
       setResendCooldown(60); // 60 second cooldown
       Alert.alert('Success', 'Verification code sent successfully');
@@ -208,18 +366,36 @@ export default function SignIn() {
                 </View>
 
                 <View style={styles.inputContainer}>
+                  <TouchableOpacity
+                    style={styles.countrySelector}
+                    onPress={() => setShowCountryPicker(true)}
+                  >
+                    <Ionicons name="globe" size={20} color="#6b7280" />
+                    <Text style={styles.countryCodeText}>
+                      {detectedCountry || '+1'}
+                    </Text>
+                    <Ionicons name="chevron-down" size={16} color="#6b7280" />
+                  </TouchableOpacity>
+                  
                   <View style={styles.inputWrapper}>
                     <Ionicons name="call" size={20} color="#6b7280" style={styles.inputIcon} />
                     <TextInput
+                      ref={phoneInputRef}
                       style={styles.input}
-                      placeholder={detectedCountry ? `Phone Number (e.g., ${detectedCountry} 234 567 8900)` : "Phone Number (e.g., +1 234 567 8900)"}
+                      placeholder={detectedCountry ? `Phone Number (e.g., ${detectedCountry.replace('+', '')}9123456789)` : "Phone Number (e.g., +19123456789)"}
                       placeholderTextColor="#9ca3af"
                       value={phone}
-                      onChangeText={setPhone}
+                      onChangeText={handlePhoneChange}
                       keyboardType="phone-pad"
                       autoCapitalize="none"
+                      autoComplete="tel"
                     />
                   </View>
+                  {detectedCountry && phone.length === 0 && (
+                    <Text style={styles.hintText}>
+                      Country code {detectedCountry} will be automatically added when you start typing
+                    </Text>
+                  )}
                 </View>
 
                 <TouchableOpacity
@@ -248,7 +424,7 @@ export default function SignIn() {
                 <View style={styles.titleContainer}>
                   <Text style={styles.title}>Verify Your Phone</Text>
                   <Text style={styles.description}>
-                    Enter the 6-digit code sent to {formatPhoneForDisplay(phone)}
+                    Enter the 6-digit code sent to {phone || formatPhoneForDisplay(phone)}
                   </Text>
                 </View>
 
@@ -357,6 +533,84 @@ export default function SignIn() {
           </Text>
         </View>
       </ScrollView>
+
+      {/* Country Picker Modal */}
+      <Modal
+        visible={showCountryPicker}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => {
+          setShowCountryPicker(false);
+          setCountrySearchQuery('');
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Select Country</Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowCountryPicker(false);
+                  setCountrySearchQuery('');
+                }}
+                style={styles.modalCloseButton}
+              >
+                <Ionicons name="close" size={24} color="#6b7280" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.searchContainer}>
+              <Ionicons name="search" size={20} color="#6b7280" style={styles.searchIcon} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search country..."
+                placeholderTextColor="#9ca3af"
+                value={countrySearchQuery}
+                onChangeText={setCountrySearchQuery}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {countrySearchQuery.length > 0 && (
+                <TouchableOpacity
+                  onPress={() => setCountrySearchQuery('')}
+                  style={styles.searchClearButton}
+                >
+                  <Ionicons name="close-circle" size={20} color="#9ca3af" />
+                </TouchableOpacity>
+              )}
+            </View>
+
+            <ScrollView style={styles.countryList} keyboardShouldPersistTaps="handled">
+              {filteredCountries.map((country) => (
+                <TouchableOpacity
+                  key={country.code}
+                  style={[
+                    styles.countryItem,
+                    detectedCountry === country.phoneCode && styles.countryItemSelected
+                  ]}
+                  onPress={() => handleCountrySelect(country)}
+                >
+                  <View style={styles.countryItemContent}>
+                    <Text style={styles.countryFlag}>{country.flag}</Text>
+                    <View style={styles.countryItemText}>
+                      <Text style={styles.countryItemName}>{country.name}</Text>
+                      <Text style={styles.countryItemCode}>{country.phoneCode}</Text>
+                    </View>
+                  </View>
+                  {detectedCountry === country.phoneCode && (
+                    <Ionicons name="checkmark-circle" size={24} color="#22c55e" />
+                  )}
+                </TouchableOpacity>
+              ))}
+              {filteredCountries.length === 0 && (
+                <View style={styles.noResultsContainer}>
+                  <Text style={styles.noResultsText}>No countries found</Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   );
 }
@@ -508,6 +762,13 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     flex: 1,
   },
+  hintText: {
+    fontSize: 12,
+    color: '#22c55e',
+    marginTop: 4,
+    marginLeft: 16,
+    fontStyle: 'italic',
+  },
   userTypeContainer: {
     marginBottom: 24,
   },
@@ -579,5 +840,122 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     textAlign: 'center',
     lineHeight: 18,
+  },
+  countrySelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f9fafb',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    marginBottom: 12,
+    minWidth: 100,
+  },
+  countryCodeText: {
+    fontSize: 16,
+    color: '#1f2937',
+    fontWeight: '600',
+    marginHorizontal: 8,
+    minWidth: 50,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    maxHeight: '80%',
+    paddingBottom: Platform.OS === 'ios' ? 40 : 24,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingVertical: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#1f2937',
+  },
+  modalCloseButton: {
+    padding: 4,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f9fafb',
+    borderRadius: 12,
+    marginHorizontal: 24,
+    marginTop: 16,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  searchIcon: {
+    marginRight: 8,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#1f2937',
+    paddingVertical: 12,
+  },
+  searchClearButton: {
+    padding: 4,
+  },
+  countryList: {
+    maxHeight: 400,
+  },
+  countryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 24,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  countryItemSelected: {
+    backgroundColor: '#f0fdf4',
+  },
+  countryItemContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  countryFlag: {
+    fontSize: 28,
+    marginRight: 12,
+  },
+  countryItemText: {
+    flex: 1,
+  },
+  countryItemName: {
+    fontSize: 16,
+    color: '#1f2937',
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  countryItemCode: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  noResultsContainer: {
+    padding: 32,
+    alignItems: 'center',
+  },
+  noResultsText: {
+    fontSize: 16,
+    color: '#6b7280',
   },
 });

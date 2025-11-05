@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { apiService, AuthResponse } from '../services/api';
+import { apiService, AuthResponse, TokenExpiredError } from '../services/api';
 
 interface User {
   id: string;
@@ -79,7 +79,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         } catch (error) {
           // Token expired or invalid, clear storage
-          await AsyncStorage.multiRemove(['user', 'token']);
+          if (error instanceof TokenExpiredError) {
+            await AsyncStorage.multiRemove(['user', 'token']);
+            setUser(null);
+            setToken(null);
+          } else {
+            // For other errors, still clear storage to be safe
+            await AsyncStorage.multiRemove(['user', 'token']);
+          }
         }
       }
     } catch (error) {
@@ -132,21 +139,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(token);
   };
 
+  // Helper function to handle token expiration
+  const handleTokenExpiration = async () => {
+    try {
+      // Clear auth state
+      await AsyncStorage.multiRemove(['user', 'token']);
+      setUser(null);
+      setToken(null);
+      console.log('Auth state cleared due to token expiration');
+    } catch (error) {
+      console.error('Error handling token expiration:', error);
+    }
+  };
+
   const updateUserProfile = async (userData: any) => {
     if (!token) {
       throw new Error('No authentication token available');
     }
 
-    const response = await apiService.updateUserProfile(token, userData);
-    
-    if (!response.success) {
-      throw new Error(response.error || 'Failed to update profile');
-    }
+    try {
+      const response = await apiService.updateUserProfile(token, userData);
+      
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to update profile');
+      }
 
-    // Update local user data
-    if (response.data) {
-      setUser(response.data);
-      await AsyncStorage.setItem('user', JSON.stringify(response.data));
+      // Update local user data
+      if (response.data) {
+        setUser(response.data);
+        await AsyncStorage.setItem('user', JSON.stringify(response.data));
+      }
+    } catch (error) {
+      if (error instanceof TokenExpiredError) {
+        // Clear auth state on token expiration
+        await handleTokenExpiration();
+        throw new Error('Your session has expired. Please sign in again.');
+      }
+      throw error;
     }
   };
 
@@ -155,16 +184,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw new Error('No authentication token available');
     }
 
-    const response = await apiService.uploadAvatar(token, avatarData);
-    
-    if (!response.success) {
-      throw new Error(response.error || 'Failed to upload avatar');
-    }
+    try {
+      const response = await apiService.uploadAvatar(token, avatarData);
+      
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to upload avatar');
+      }
 
-    // Update local user data with new avatar
-    if (response.data) {
-      setUser(response.data);
-      await AsyncStorage.setItem('user', JSON.stringify(response.data));
+      // Update local user data with new avatar
+      if (response.data) {
+        setUser(response.data);
+        await AsyncStorage.setItem('user', JSON.stringify(response.data));
+      }
+    } catch (error) {
+      if (error instanceof TokenExpiredError) {
+        // Clear auth state on token expiration
+        await handleTokenExpiration();
+        throw new Error('Your session has expired. Please sign in again.');
+      }
+      throw error;
     }
   };
 
@@ -173,16 +211,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw new Error('No authentication token available');
     }
 
-    const response = await apiService.uploadPortfolio(token, portfolioData);
-    
-    if (!response.success) {
-      throw new Error(response.error || 'Failed to upload portfolio');
-    }
+    try {
+      const response = await apiService.uploadPortfolio(token, portfolioData);
+      
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to upload portfolio');
+      }
 
-    // Update local user data with new portfolio
-    if (response.data) {
-      setUser(response.data);
-      await AsyncStorage.setItem('user', JSON.stringify(response.data));
+      // Update local user data with new portfolio
+      if (response.data) {
+        setUser(response.data);
+        await AsyncStorage.setItem('user', JSON.stringify(response.data));
+      }
+    } catch (error) {
+      if (error instanceof TokenExpiredError) {
+        // Clear auth state on token expiration
+        await handleTokenExpiration();
+        throw new Error('Your session has expired. Please sign in again.');
+      }
+      throw error;
     }
   };
 
@@ -198,6 +245,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await AsyncStorage.setItem('user', JSON.stringify(response.data));
       }
     } catch (error) {
+      if (error instanceof TokenExpiredError) {
+        // Clear auth state on token expiration
+        await handleTokenExpiration();
+        throw new Error('Your session has expired. Please sign in again.');
+      }
       console.error('Error refreshing user data:', error);
       throw error;
     }

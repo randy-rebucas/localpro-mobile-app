@@ -71,6 +71,13 @@ export default function StackLayout() {
           title: 'LocalPro Plus',
         }}
       />
+      <Stack.Screen
+        name="marketplace-category"
+        options={{
+          title: 'Category Services',
+          headerBackTitleVisible: false,
+        }}
+      />
     </Stack>
   );
 }
