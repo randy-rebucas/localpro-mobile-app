@@ -16,7 +16,8 @@ export default function StackLayout() {
         headerLeft: () => (
           <TouchableOpacity
             onPress={() => router.push('/(tabs)')}
-            style={{ marginLeft: 16 }}
+            style={{ marginLeft: 16, padding: 4, backgroundColor: 'transparent' }}
+            activeOpacity={0.7}
           >
             <Ionicons name="home" size={24} color="white" />
           </TouchableOpacity>
@@ -24,7 +25,7 @@ export default function StackLayout() {
       }}
     >
       <Stack.Screen
-        name="marketplace"
+        name="marketplace/index"
         options={{
           title: 'Marketplace',
         }}
@@ -72,10 +73,31 @@ export default function StackLayout() {
         }}
       />
       <Stack.Screen
-        name="marketplace-category"
+        name="marketplace/category"
         options={{
           title: 'Category Services',
-          headerBackTitleVisible: false,
+          headerBackTitle: '',
+        }}
+      />
+      <Stack.Screen
+        name="marketplace/service-details"
+        options={{
+          title: 'Service Details',
+          headerBackTitle: '',
+        }}
+      />
+      <Stack.Screen
+        name="messages"
+        options={{
+          title: 'Messages',
+          headerBackTitle: '',
+        }}
+      />
+      <Stack.Screen
+        name="notifications"
+        options={{
+          title: 'Notifications',
+          headerBackTitle: '',
         }}
       />
     </Stack>

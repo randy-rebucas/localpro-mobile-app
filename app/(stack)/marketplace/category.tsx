@@ -2,21 +2,21 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  FlatList,
-  Image,
-  Modal,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    FlatList,
+    Image,
+    Modal,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useAuth } from '../../contexts/AuthContext';
-import { apiService } from '../../services/api';
+import { useAuth } from '../../../contexts/AuthContext';
+import { apiService } from '../../../services/api';
 
 interface MarketplaceService {
   _id?: string;
@@ -181,6 +181,8 @@ export default function MarketplaceCategoryScreen() {
         setLoadingMore(true);
       } else {
         setLoading(true);
+        // Clear services when starting a new load (not append)
+        setServices([]);
       }
       setError(null);
 
@@ -247,6 +249,7 @@ export default function MarketplaceCategoryScreen() {
   useEffect(() => {
     // Reset to page 1 when filters or category change
     setServices([]);
+    setLoading(true);
     setPagination(prev => ({ ...prev, page: 1 }));
     fetchServices(false, 1, false);
   }, [categoryKey, token, filters]);
@@ -324,8 +327,15 @@ export default function MarketplaceCategoryScreen() {
       <TouchableOpacity
         style={styles.serviceItem}
         onPress={() => {
-          // Navigate to service detail screen when implemented
-          console.log('Navigate to service:', serviceId);
+          // Navigate to service detail screen
+          const serviceData = encodeURIComponent(JSON.stringify(service));
+          router.push({
+            pathname: '/(stack)/marketplace/service-details',
+            params: {
+              serviceId: serviceId,
+              serviceData: serviceData,
+            },
+          });
         }}
         activeOpacity={0.7}
       >
@@ -641,12 +651,58 @@ export default function MarketplaceCategoryScreen() {
     </Modal>
   );
 
+  // Map emoji icons to Ionicons
+  const emojiToIonicon = (emoji: string): keyof typeof Ionicons.glyphMap => {
+    const emojiMap: Record<string, keyof typeof Ionicons.glyphMap> = {
+      '🧹': 'sparkles', // Cleaning
+      '🔧': 'construct', // Handyman/Repair
+      '⚡': 'flash', // Electrical
+      '📦': 'cube', // Moving/Delivery
+      '🌳': 'leaf', // Landscaping
+      '🎨': 'brush', // Painting
+      '🪵': 'build', // Carpentry
+      '🏠': 'home', // Home Services
+      '🏡': 'home', // Home Services
+      '❄️': 'snow', // HVAC/Cooling
+      '🔌': 'flash', // Electrical
+      '🔐': 'lock-closed', // Security
+      '🔨': 'hammer', // Construction
+      '🚨': 'shield', // Security/Emergency
+      '🏊': 'water', // Pool Services
+      '🐛': 'bug', // Pest Control
+      '🧼': 'sparkles', // Cleaning
+      '🪟': 'home-outline', // Windows
+      '🌧️': 'rainy', // Roofing/Waterproofing
+      '💦': 'water', // Plumbing
+      '📋': 'document-text', // General Services
+      '🚗': 'car', // Auto Services
+      '🌿': 'leaf', // Gardening
+      '🔩': 'construct', // Mechanical
+      '🛠️': 'construct', // Tools/Repair
+      '🏗️': 'business', // Construction
+      '🧱': 'cube', // Masonry
+      '🪚': 'build', // Carpentry
+      '🔲': 'square', // Flooring
+      '💡': 'bulb', // Lighting
+    };
+    return emojiMap[emoji] || 'document-text';
+  };
+
+  const getCategoryIcon = () => {
+    const iconEmoji = categoryIcon || '📋';
+    // Check if it's already an icon name (not an emoji)
+    if (!iconEmoji.match(/[\u{1F300}-\u{1F9FF}]/u)) {
+      return iconEmoji as keyof typeof Ionicons.glyphMap;
+    }
+    return emojiToIonicon(iconEmoji);
+  };
+
   const renderListHeader = () => (
     <View>
       {/* Category Header */}
       <View style={styles.categoryHeader}>
         <View style={styles.categoryIconContainer}>
-          <Text style={styles.categoryIcon}>{categoryIcon || '📋'}</Text>
+          <Ionicons name={getCategoryIcon()} size={32} color="#22c55e" />
         </View>
         <View style={styles.categoryInfo}>
           <Text style={styles.categoryTitle}>{categoryName || 'Category'}</Text>
@@ -659,8 +715,8 @@ export default function MarketplaceCategoryScreen() {
       {/* Filters and Sort */}
       {renderFilters()}
 
-      {/* Services Count */}
-      {services.length > 0 && (
+      {/* Services Count - Only show when not loading and has services */}
+      {!loading && services.length > 0 && (
         <View style={styles.servicesCountContainer}>
           <Text style={styles.servicesCount}>
             {pagination.total > 0 ? `${pagination.total} ` : ''}
@@ -730,21 +786,29 @@ export default function MarketplaceCategoryScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={[]}>
-      <FlatList
-        data={services}
-        renderItem={renderServiceItem}
-        keyExtractor={(item) => item.id || item._id || Math.random().toString()}
-        ListHeaderComponent={renderListHeader}
-        ListFooterComponent={renderListFooter}
-        ListEmptyComponent={renderListEmpty}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-        onEndReached={loadMore}
-        onEndReachedThreshold={0.5}
-        contentContainerStyle={styles.listContent}
-        showsVerticalScrollIndicator={false}
-      />
+      {loading && services.length === 0 ? (
+        // Show loading screen when initially loading
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#22c55e" />
+          <Text style={styles.loadingText}>Loading services...</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={services}
+          renderItem={renderServiceItem}
+          keyExtractor={(item) => item.id || item._id || Math.random().toString()}
+          ListHeaderComponent={renderListHeader}
+          ListFooterComponent={renderListFooter}
+          ListEmptyComponent={renderListEmpty}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+          }
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.5}
+          contentContainerStyle={styles.listContent}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
 
       {/* Filter Modal */}
       {renderFilterModal()}
@@ -782,9 +846,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
-  },
-  categoryIcon: {
-    fontSize: 32,
   },
   categoryInfo: {
     flex: 1,

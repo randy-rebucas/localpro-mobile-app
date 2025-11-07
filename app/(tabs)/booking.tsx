@@ -16,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { API_CONFIG, ApiUtils, buildApiUrl, getApiHeaders } from '../../config/api';
 import { useAuth } from '../../contexts/AuthContext';
+import { useProviderMode } from '../../contexts/ProviderModeContext';
 
 interface Booking {
   id: string;
@@ -78,9 +79,21 @@ interface ApiResponse<T = any> {
   };
 }
 
+interface Client {
+  id: string;
+  name: string;
+  avatar?: string;
+  totalBookings: number;
+  totalSpent: number;
+  lastBookingDate: string;
+  rating?: number;
+}
+
 export default function BookingScreen() {
   const { user, token, isLoading } = useAuth();
+  const { isProviderMode } = useProviderMode();
   const [activeTab, setActiveTab] = useState<'upcoming' | 'past'>('upcoming');
+  const [clients, setClients] = useState<Client[]>([]);
   const [showNewBooking, setShowNewBooking] = useState(false);
   const [selectedService, setSelectedService] = useState('');
   const [selectedDate, setSelectedDate] = useState('');
@@ -147,15 +160,46 @@ export default function BookingScreen() {
     }
   };
 
+  const fetchClients = async () => {
+    try {
+      // This would be the actual API endpoint for clients
+      // For now, using mock data
+      setClients([
+        {
+          id: '1',
+          name: 'John Doe',
+          totalBookings: 5,
+          totalSpent: 750,
+          lastBookingDate: new Date().toISOString(),
+          rating: 4.5,
+        },
+        {
+          id: '2',
+          name: 'Jane Smith',
+          totalBookings: 3,
+          totalSpent: 450,
+          lastBookingDate: new Date().toISOString(),
+          rating: 5.0,
+        },
+      ]);
+    } catch (err) {
+      console.error('Error fetching clients:', err);
+    }
+  };
+
   const loadBookingData = async () => {
     setLoading(true);
     setError(null);
     
     try {
-      await Promise.all([
-        fetchBookings(),
-        fetchServices(),
-      ]);
+      if (isProviderMode) {
+        await fetchClients();
+      } else {
+        await Promise.all([
+          fetchBookings(),
+          fetchServices(),
+        ]);
+      }
     } finally {
       setLoading(false);
     }
@@ -171,7 +215,7 @@ export default function BookingScreen() {
     if (token) {
       loadBookingData();
     }
-  }, [token]);
+  }, [token, isProviderMode]);
 
   const serviceCategories: ServiceCategory[] = [
     {
@@ -486,14 +530,18 @@ export default function BookingScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Bookings</Text>
-          <TouchableOpacity 
-            style={styles.newBookingButton}
-            onPress={() => setShowNewBooking(true)}
-          >
-            <Ionicons name="add" size={20} color="#fff" />
-            <Text style={styles.newBookingButtonText}>New Booking</Text>
-          </TouchableOpacity>
+          <Text style={styles.headerTitle}>
+            {isProviderMode ? 'My Clients' : 'Bookings'}
+          </Text>
+          {!isProviderMode && (
+            <TouchableOpacity 
+              style={styles.newBookingButton}
+              onPress={() => setShowNewBooking(true)}
+            >
+              <Ionicons name="add" size={20} color="#fff" />
+              <Text style={styles.newBookingButtonText}>New Booking</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {/* Error Display */}
@@ -507,75 +555,119 @@ export default function BookingScreen() {
           </View>
         )}
 
-        {/* Service Categories */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Book a Service</Text>
-          <FlatList
-            data={serviceCategories}
-            renderItem={renderServiceCategory}
-            keyExtractor={(item) => item.id}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.serviceCategoriesList}
-          />
-        </View>
-
-        {/* Booking Tabs */}
-        <View style={styles.tabContainer}>
-          <TouchableOpacity 
-            style={[styles.tab, activeTab === 'upcoming' && styles.activeTab]}
-            onPress={() => setActiveTab('upcoming')}
-          >
-            <Text style={[styles.tabText, activeTab === 'upcoming' && styles.activeTabText]}>
-              Upcoming ({upcomingBookings.length})
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={[styles.tab, activeTab === 'past' && styles.activeTab]}
-            onPress={() => setActiveTab('past')}
-          >
-            <Text style={[styles.tabText, activeTab === 'past' && styles.activeTabText]}>
-              Past ({pastBookings.length})
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Bookings List */}
-        <View style={styles.bookingsContainer}>
-          {activeTab === 'upcoming' ? (
-            upcomingBookings.length > 0 ? (
-              <FlatList
-                data={upcomingBookings}
-                renderItem={renderBookingCard}
-                keyExtractor={(item) => item.id}
-                showsVerticalScrollIndicator={false}
-                scrollEnabled={false}
-              />
+        {isProviderMode ? (
+          /* My Clients View */
+          <View style={styles.clientsContainer}>
+            {clients.length > 0 ? (
+              clients.map((client) => (
+                <TouchableOpacity key={client.id} style={styles.clientCard}>
+                  <View style={styles.clientAvatar}>
+                    <Ionicons name="person" size={24} color="#6b7280" />
+                  </View>
+                  <View style={styles.clientInfo}>
+                    <Text style={styles.clientName}>{client.name}</Text>
+                    <View style={styles.clientStats}>
+                      <Text style={styles.clientStatText}>
+                        {client.totalBookings} bookings
+                      </Text>
+                      <Text style={styles.clientStatText}>•</Text>
+                      <Text style={styles.clientStatText}>
+                        ${client.totalSpent} total
+                      </Text>
+                    </View>
+                    {client.rating && (
+                      <View style={styles.clientRating}>
+                        <Ionicons name="star" size={14} color="#f59e0b" />
+                        <Text style={styles.clientRatingText}>{client.rating}</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color="#d1d5db" />
+                </TouchableOpacity>
+              ))
             ) : (
               <View style={styles.emptyState}>
-                <Ionicons name="calendar-outline" size={64} color="#d1d5db" />
-                <Text style={styles.emptyStateTitle}>No Upcoming Bookings</Text>
-                <Text style={styles.emptyStateText}>Book a service to get started</Text>
+                <Ionicons name="people-outline" size={64} color="#d1d5db" />
+                <Text style={styles.emptyStateTitle}>No Clients Yet</Text>
+                <Text style={styles.emptyStateText}>
+                  Your clients will appear here once they book your services
+                </Text>
               </View>
-            )
-          ) : (
-            pastBookings.length > 0 ? (
+            )}
+          </View>
+        ) : (
+          <>
+            {/* Service Categories */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Book a Service</Text>
               <FlatList
-                data={pastBookings}
-                renderItem={renderBookingCard}
+                data={serviceCategories}
+                renderItem={renderServiceCategory}
                 keyExtractor={(item) => item.id}
-                showsVerticalScrollIndicator={false}
-                scrollEnabled={false}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.serviceCategoriesList}
               />
-            ) : (
-              <View style={styles.emptyState}>
-                <Ionicons name="time-outline" size={64} color="#d1d5db" />
-                <Text style={styles.emptyStateTitle}>No Past Bookings</Text>
-                <Text style={styles.emptyStateText}>Your completed bookings will appear here</Text>
-              </View>
-            )
-          )}
-        </View>
+            </View>
+
+            {/* Booking Tabs */}
+            <View style={styles.tabContainer}>
+              <TouchableOpacity 
+                style={[styles.tab, activeTab === 'upcoming' && styles.activeTab]}
+                onPress={() => setActiveTab('upcoming')}
+              >
+                <Text style={[styles.tabText, activeTab === 'upcoming' && styles.activeTabText]}>
+                  Upcoming ({upcomingBookings.length})
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.tab, activeTab === 'past' && styles.activeTab]}
+                onPress={() => setActiveTab('past')}
+              >
+                <Text style={[styles.tabText, activeTab === 'past' && styles.activeTabText]}>
+                  Past ({pastBookings.length})
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Bookings List */}
+            <View style={styles.bookingsContainer}>
+              {activeTab === 'upcoming' ? (
+                upcomingBookings.length > 0 ? (
+                  <FlatList
+                    data={upcomingBookings}
+                    renderItem={renderBookingCard}
+                    keyExtractor={(item) => item.id}
+                    showsVerticalScrollIndicator={false}
+                    scrollEnabled={false}
+                  />
+                ) : (
+                  <View style={styles.emptyState}>
+                    <Ionicons name="calendar-outline" size={64} color="#d1d5db" />
+                    <Text style={styles.emptyStateTitle}>No Upcoming Bookings</Text>
+                    <Text style={styles.emptyStateText}>Book a service to get started</Text>
+                  </View>
+                )
+              ) : (
+                pastBookings.length > 0 ? (
+                  <FlatList
+                    data={pastBookings}
+                    renderItem={renderBookingCard}
+                    keyExtractor={(item) => item.id}
+                    showsVerticalScrollIndicator={false}
+                    scrollEnabled={false}
+                  />
+                ) : (
+                  <View style={styles.emptyState}>
+                    <Ionicons name="time-outline" size={64} color="#d1d5db" />
+                    <Text style={styles.emptyStateTitle}>No Past Bookings</Text>
+                    <Text style={styles.emptyStateText}>Your completed bookings will appear here</Text>
+                  </View>
+                )
+              )}
+            </View>
+          </>
+        )}
       </ScrollView>
 
       {/* New Booking Modal */}
@@ -980,5 +1072,60 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#fff',
+  },
+  clientsContainer: {
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+  clientCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  clientAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#f3f4f6',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  clientInfo: {
+    flex: 1,
+  },
+  clientName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+    marginBottom: 4,
+  },
+  clientStats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  clientStatText: {
+    fontSize: 12,
+    color: '#6b7280',
+  },
+  clientRating: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  clientRatingText: {
+    fontSize: 12,
+    color: '#f59e0b',
+    fontWeight: '600',
   },
 });

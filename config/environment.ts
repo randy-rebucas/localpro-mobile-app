@@ -4,6 +4,9 @@ export const ENV = {
   API_BASE_URL: 'https://localpro-super-app.onrender.com',
   API_TIMEOUT: 10000,
   
+  // Google Maps API
+  GOOGLE_PLACES_API_KEY: process.env.EXPO_PUBLIC_GOOGLE_PLACES_API_KEY || 'AIzaSyCJG1n0iHEeMhb-QGUnZRw3vKaSDWSA5UQ',
+  
   // App Configuration
   APP_NAME: 'LocalPro Super App',
   APP_VERSION: '1.0.0',

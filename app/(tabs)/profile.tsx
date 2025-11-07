@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../contexts/AuthContext';
+import { useProviderMode } from '../../contexts/ProviderModeContext';
 
 // Extended user interface for profile screen
 interface ExtendedUser {
@@ -42,6 +43,7 @@ interface ExtendedUser {
 
 export default function ProfileScreen() {
   const { user, updateUserProfile, uploadAvatar, refreshUserData, signOut, isLoading } = useAuth();
+  const { isProviderMode, toggleProviderMode } = useProviderMode();
   const router = useRouter();
   const [isEditing, setIsEditing] = useState(false);
   const [editData, setEditData] = useState({
@@ -586,6 +588,47 @@ export default function ProfileScreen() {
                 <Text style={styles.emptyPortfolioSubtext}>Add your work samples to showcase your skills</Text>
               </View>
             )}
+          </View>
+        )}
+
+        {/* Provider Mode Toggle - Only show if user role is provider */}
+        {user?.role === 'provider' && (
+          <View style={styles.settingsSection}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Provider Mode</Text>
+            </View>
+            
+            <TouchableOpacity 
+              style={styles.settingItem}
+              onPress={toggleProviderMode}
+            >
+              <View style={styles.settingIconContainer}>
+                <Ionicons 
+                  name={isProviderMode ? "briefcase" : "briefcase-outline"} 
+                  size={24} 
+                  color={isProviderMode ? "#22c55e" : "#6b7280"} 
+                />
+              </View>
+              <View style={styles.settingContent}>
+                <Text style={styles.settingText}>
+                  {isProviderMode ? 'Provider Mode' : 'Client Mode'}
+                </Text>
+                <Text style={styles.settingSubtext}>
+                  {isProviderMode 
+                    ? 'Currently viewing as service provider' 
+                    : 'Switch to provider mode to manage services'}
+                </Text>
+              </View>
+              <View style={[
+                styles.toggleSwitch,
+                { backgroundColor: isProviderMode ? '#22c55e' : '#d1d5db' }
+              ]}>
+                <View style={[
+                  styles.toggleThumb,
+                  { transform: [{ translateX: isProviderMode ? 20 : 0 }] }
+                ]} />
+              </View>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -1401,5 +1444,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#9ca3af',
     textAlign: 'center',
+  },
+  toggleSwitch: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+  toggleThumb: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'white',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
   },
 });

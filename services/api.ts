@@ -165,16 +165,20 @@ class ApiService {
         throw error;
       }
       
+      // Handle AbortError (timeout) gracefully without logging as error
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.warn('Request timeout after', this.timeout, 'ms');
+        return {
+          success: false,
+          error: 'Request timeout - please check your internet connection',
+        };
+      }
+      
+      // Log other errors
       console.error('API Request failed:', error);
       
-      // Handle specific error types
+      // Handle other error types
       if (error instanceof Error) {
-        if (error.name === 'AbortError') {
-          return {
-            success: false,
-            error: 'Request timeout - please check your internet connection',
-          };
-        }
         return {
           success: false,
           error: error.message,
@@ -370,6 +374,7 @@ class ApiService {
       method: 'GET',
     }, token);
   }
+
 }
 
 // Export singleton instance
