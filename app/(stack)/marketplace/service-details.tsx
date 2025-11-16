@@ -1,20 +1,21 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  Modal,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Image,
+    Modal,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../../contexts/AuthContext';
+import { apiService, TokenExpiredError } from '../../../services/api';
 
 interface MarketplaceService {
   _id?: string;
@@ -113,6 +114,7 @@ interface BookingFormData {
   selectedAddOns: string[];
   quantity?: number;
   area?: number; // for per_sqft pricing
+  paymentMethod?: 'paypal' | 'paymaya';
 }
 
 export default function ServiceDetailsScreen() {
@@ -123,13 +125,22 @@ export default function ServiceDetailsScreen() {
     serviceData?: string;
     action?: string;
   }>();
-  const { token } = useAuth();
+  const { token, handleTokenExpiration } = useAuth();
 
   const [service, setService] = useState<MarketplaceService | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [showBookingModal, setShowBookingModal] = useState(false);
+  const [showBookingSummary, setShowBookingSummary] = useState(false);
+  const [showBookingConfirmation, setShowBookingConfirmation] = useState(false);
   const [bookingLoading, setBookingLoading] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [createdBookingId, setCreatedBookingId] = useState<string | null>(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [availableTimeSlots, setAvailableTimeSlots] = useState<string[]>([]);
+  const [loadingTimeSlots, setLoadingTimeSlots] = useState(false);
   const [bookingForm, setBookingForm] = useState<BookingFormData>({
     selectedDate: '',
     selectedTime: '',
@@ -166,6 +177,116 @@ export default function ServiceDetailsScreen() {
     }
   }, [action, service, loading]);
 
+  // Helper function to generate default time slots (9 AM - 5 PM, 30-minute intervals)
+  const generateDefaultTimeSlots = (): string[] => {
+    const slots: string[] = [];
+    for (let hour = 9; hour < 17; hour++) {
+      for (let minute = 0; minute < 60; minute += 30) {
+        slots.push(`${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`);
+      }
+    }
+    // Add 5:00 PM
+    slots.push('17:00');
+    return slots;
+  };
+
+  // Helper function to generate slots from schedule (30-minute intervals)
+  const generateSlotsFromSchedule = (startTime: string, endTime: string): string[] => {
+    const slots: string[] = [];
+    const [startHour, startMin] = startTime.split(':').map(Number);
+    const [endHour, endMin] = endTime.split(':').map(Number);
+    
+    let currentHour = startHour;
+    let currentMin = startMin;
+    
+    while (currentHour < endHour || (currentHour === endHour && currentMin <= endMin)) {
+      slots.push(
+        `${currentHour.toString().padStart(2, '0')}:${currentMin.toString().padStart(2, '0')}`
+      );
+      
+      // Increment by 30 minutes
+      currentMin += 30;
+      if (currentMin >= 60) {
+        currentMin = 0;
+        currentHour += 1;
+      }
+      
+      // Stop if we've passed the end time
+      if (currentHour > endHour || (currentHour === endHour && currentMin > endMin)) {
+        break;
+      }
+    }
+    
+    return slots;
+  };
+
+  // Fetch available time slots when date is selected
+  useEffect(() => {
+    const fetchAvailableSlots = async () => {
+      if (!service || !bookingForm.selectedDate || !token) {
+        setAvailableTimeSlots([]);
+        // Clear selected time if date changes
+        if (bookingForm.selectedTime) {
+          setBookingForm(prev => ({ ...prev, selectedTime: '' }));
+        }
+        return;
+      }
+
+      setLoadingTimeSlots(true);
+      try {
+        const response = await apiService.getAvailableTimeSlots(
+          service.id || service._id || '',
+          bookingForm.selectedDate,
+          token
+        );
+
+        if (response.success && response.data?.availableSlots && response.data.availableSlots.length > 0) {
+          // Use API-provided slots
+          setAvailableTimeSlots(response.data.availableSlots);
+        } else {
+          // Fallback: if API doesn't return slots, use service availability schedule
+          if (service.availability?.schedule && service.availability.schedule.length > 0) {
+            const selectedDate = new Date(bookingForm.selectedDate);
+            const dayName = selectedDate.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+            const daySchedule = service.availability.schedule.find(
+              s => s.day.toLowerCase() === dayName && s.isAvailable
+            );
+            
+            if (daySchedule && daySchedule.startTime && daySchedule.endTime) {
+              // Generate slots based on provider's schedule (30-minute intervals)
+              const slots = generateSlotsFromSchedule(daySchedule.startTime, daySchedule.endTime);
+              if (slots.length > 0) {
+                setAvailableTimeSlots(slots);
+              } else {
+                // If schedule generation fails, use defaults
+                setAvailableTimeSlots(generateDefaultTimeSlots());
+              }
+            } else {
+              // No schedule for this day, use default slots
+              setAvailableTimeSlots(generateDefaultTimeSlots());
+            }
+          } else {
+            // No schedule configured, use default slots (9 AM - 5 PM with 30-minute intervals)
+            setAvailableTimeSlots(generateDefaultTimeSlots());
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching available time slots:', error);
+        // Handle token expiration
+        if (error instanceof TokenExpiredError) {
+          await handleTokenExpiration();
+          return;
+        }
+        // Fallback to default slots on error (9 AM - 5 PM with 30-minute intervals)
+        setAvailableTimeSlots(generateDefaultTimeSlots());
+      } finally {
+        setLoadingTimeSlots(false);
+      }
+    };
+
+    fetchAvailableSlots();
+  }, [bookingForm.selectedDate, service, token]);
+
   useEffect(() => {
     if (service) {
       navigation.setOptions({
@@ -192,7 +313,7 @@ export default function ServiceDetailsScreen() {
   };
 
   const calculateTotalPrice = () => {
-    if (!service) return 0;
+    if (!service) return { total: 0, currency: 'USD' };
     
     let total = service.pricing.basePrice;
     const currency = service.pricing.currency || 'USD';
@@ -231,7 +352,67 @@ export default function ServiceDetailsScreen() {
     return { total, currency };
   };
 
-  const handleBookService = async () => {
+  // Validate booking before proceeding
+  const validateBooking = async (): Promise<boolean> => {
+    if (!service || !token) return false;
+
+    setValidating(true);
+    setValidationErrors([]);
+    const errors: string[] = [];
+
+    try {
+      // Validate service availability
+      const availabilityResponse = await apiService.checkServiceAvailability(
+        service.id || service._id || '',
+        bookingForm.selectedDate,
+        bookingForm.selectedTime,
+        token
+      );
+
+      if (!availabilityResponse.success || !availabilityResponse.data?.available) {
+        errors.push('Service is not available at the selected date and time');
+      }
+
+      // Validate service area coverage
+      const areaResponse = await apiService.validateServiceArea(
+        service.id || service._id || '',
+        {
+          street: bookingForm.address,
+          city: bookingForm.city,
+          state: bookingForm.state,
+          zipCode: bookingForm.zipCode,
+        },
+        token
+      );
+
+      if (!areaResponse.success || !areaResponse.data?.isCovered) {
+        errors.push('Service is not available in your selected location');
+      }
+
+      if (errors.length > 0) {
+        setValidationErrors(errors);
+        return false;
+      }
+
+      return true;
+    } catch (error) {
+      console.error('Validation error:', error);
+      // Handle token expiration
+      if (error instanceof TokenExpiredError) {
+        await handleTokenExpiration();
+        errors.push('Your session has expired. Please sign in again.');
+      } else {
+        errors.push('Failed to validate booking. Please try again.');
+      }
+      setValidationErrors(errors);
+      return false;
+    } finally {
+      setValidating(false);
+    }
+  };
+
+  // Show booking summary
+  const handleShowSummary = async () => {
     if (!service) return;
 
     // Validate form
@@ -245,11 +426,51 @@ export default function ServiceDetailsScreen() {
       return;
     }
 
+    // Validate pricing-specific fields
+    if (service.pricing.type === 'per_sqft' && !bookingForm.area) {
+      Alert.alert('Error', 'Please enter the area in square feet');
+      return;
+    }
+
+    if (service.pricing.type === 'per_item' && !bookingForm.quantity) {
+      Alert.alert('Error', 'Please enter the quantity');
+      return;
+    }
+
+    // Validate booking
+    const isValid = await validateBooking();
+    if (!isValid) {
+      Alert.alert(
+        'Validation Error',
+        validationErrors.join('\n') || 'Please check your booking details'
+      );
+      return;
+    }
+
+    // Show summary
+    setShowBookingModal(false);
+    setShowBookingSummary(true);
+  };
+
+  // Process booking and payment
+  const handleBookService = async () => {
+    if (!service || !token) {
+      Alert.alert('Error', 'Please log in to book a service');
+      return;
+    }
+
+    if (!bookingForm.paymentMethod) {
+      Alert.alert('Error', 'Please select a payment method');
+      return;
+    }
+
     setBookingLoading(true);
     try {
-      // TODO: Implement booking API call
+      const { total, currency } = calculateTotalPrice();
+      
+      // Create booking
       const bookingData = {
-        serviceId: service.id || service._id,
+        serviceId: service.id || service._id || '',
         date: bookingForm.selectedDate,
         time: bookingForm.selectedTime,
         address: {
@@ -261,30 +482,55 @@ export default function ServiceDetailsScreen() {
         specialInstructions: bookingForm.specialInstructions,
         package: bookingForm.selectedPackage,
         addOns: bookingForm.selectedAddOns,
-        totalPrice: calculateTotalPrice().total,
+        quantity: bookingForm.quantity,
+        area: bookingForm.area,
+        totalPrice: total,
+        paymentMethod: bookingForm.paymentMethod,
       };
 
-      console.log('Booking data:', bookingData);
-      
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      Alert.alert(
-        'Booking Request Sent',
-        'Your booking request has been sent to the service provider. You will receive a confirmation shortly.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              setShowBookingModal(false);
-              router.back();
-            },
-          },
-        ]
-      );
+      const bookingResponse = await apiService.createBooking(token, bookingData);
+
+      if (!bookingResponse.success || !bookingResponse.data) {
+        throw new Error(bookingResponse.error || 'Failed to create booking');
+      }
+
+      const bookingId = bookingResponse.data.booking?._id || bookingResponse.data._id || bookingResponse.data.id;
+      setCreatedBookingId(bookingId);
+
+      // Process payment based on method
+      if (bookingForm.paymentMethod === 'paypal') {
+        // For PayPal, the backend should return a payment link or order ID
+        // This would typically open a web view or redirect to PayPal
+        const paypalOrderId = bookingResponse.data.paypalOrderId;
+        if (paypalOrderId) {
+          const approveResponse = await apiService.approvePayPalPayment(token, bookingId, paypalOrderId);
+          if (!approveResponse.success) {
+            throw new Error(approveResponse.error || 'Payment approval failed');
+          }
+        }
+      } else if (bookingForm.paymentMethod === 'paymaya') {
+        // For PayMaya, create checkout
+        const checkoutResponse = await apiService.createPayMayaCheckout(token, bookingId, total, currency);
+        if (!checkoutResponse.success) {
+          throw new Error(checkoutResponse.error || 'Payment checkout failed');
+        }
+        // PayMaya would typically return a checkout URL to open in web view
+      }
+
+      // Show confirmation
+      setShowBookingSummary(false);
+      setShowBookingConfirmation(true);
     } catch (error) {
       console.error('Booking error:', error);
-      Alert.alert('Error', 'Failed to submit booking. Please try again.');
+      // Handle token expiration
+      if (error instanceof TokenExpiredError) {
+        await handleTokenExpiration();
+        return;
+      }
+      Alert.alert(
+        'Booking Failed',
+        error instanceof Error ? error.message : 'Failed to complete booking. Please try again.'
+      );
     } finally {
       setBookingLoading(false);
     }
@@ -633,21 +879,142 @@ export default function ServiceDetailsScreen() {
               {/* Date & Time */}
               <View style={styles.formSection}>
                 <Text style={styles.formLabel}>Date & Time *</Text>
-                <View style={styles.dateTimeRow}>
-                  <TextInput
-                    style={styles.dateInput}
-                    placeholder="Select Date (YYYY-MM-DD)"
-                    value={bookingForm.selectedDate}
-                    onChangeText={(text) => setBookingForm(prev => ({ ...prev, selectedDate: text }))}
-                    placeholderTextColor="#9ca3af"
-                  />
-                  <TextInput
-                    style={styles.timeInput}
-                    placeholder="Time (HH:MM)"
-                    value={bookingForm.selectedTime}
-                    onChangeText={(text) => setBookingForm(prev => ({ ...prev, selectedTime: text }))}
-                    placeholderTextColor="#9ca3af"
-                  />
+                
+                {/* 5 Days Display in Carousel */}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.dateCarouselContent}
+                  style={styles.dateCarouselContainer}
+                  snapToInterval={110}
+                  snapToAlignment="start"
+                  decelerationRate="fast"
+                >
+                  {(() => {
+                    const days: React.ReactElement[] = [];
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+
+                    for (let i = 0; i < 5; i++) {
+                      const date = new Date(today);
+                      date.setDate(today.getDate() + i);
+                      const dateStr = `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`;
+                      const isSelected = bookingForm.selectedDate === dateStr;
+                      const isToday = i === 0;
+                      const isPast = i === 0 ? false : date < today;
+
+                      days.push(
+                        <TouchableOpacity
+                          key={i}
+                          style={[
+                            styles.dateBlockCard,
+                            isSelected && styles.dateBlockCardSelected,
+                            isToday && !isSelected && styles.dateBlockCardToday,
+                            isPast && styles.dateBlockCardPast,
+                          ]}
+                          onPress={() => {
+                            if (!isPast) {
+                              setBookingForm(prev => ({ ...prev, selectedDate: dateStr }));
+                            }
+                          }}
+                          disabled={isPast}
+                          activeOpacity={0.7}
+                        >
+                          <Text
+                            style={[
+                              styles.dateBlockCardDayName,
+                              isSelected && styles.dateBlockCardTextSelected,
+                              isPast && styles.dateBlockCardTextPast,
+                            ]}
+                          >
+                            {isToday ? 'Today' : date.toLocaleDateString('en-US', { weekday: 'short' })}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.dateBlockCardDayNumber,
+                              isSelected && styles.dateBlockCardTextSelected,
+                              isPast && styles.dateBlockCardTextPast,
+                            ]}
+                          >
+                            {date.getDate()}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.dateBlockCardMonth,
+                              isSelected && styles.dateBlockCardTextSelected,
+                              isPast && styles.dateBlockCardTextPast,
+                            ]}
+                          >
+                            {date.toLocaleDateString('en-US', { month: 'short' })}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    }
+
+                    return days;
+                  })()}
+                </ScrollView>
+
+                {/* Time Label */}
+                <Text style={styles.timeLabel}>Select Time</Text>
+
+                {/* Time Slots Display - Wrapping */}
+                <View style={styles.timeSlotsContainer}>
+                  {loadingTimeSlots ? (
+                    <View style={styles.timeSlotsLoading}>
+                      <ActivityIndicator size="small" color="#22c55e" />
+                      <Text style={styles.timeSlotsLoadingText}>Loading available times...</Text>
+                    </View>
+                  ) : availableTimeSlots.length === 0 && bookingForm.selectedDate ? (
+                    <View style={styles.timeSlotsEmpty}>
+                      <Ionicons name="time-outline" size={24} color="#9ca3af" />
+                      <Text style={styles.timeSlotsEmptyText}>
+                        No available time slots for this date
+                      </Text>
+                    </View>
+                  ) : !bookingForm.selectedDate ? (
+                    <View style={styles.timeSlotsEmpty}>
+                      <Ionicons name="calendar-outline" size={24} color="#9ca3af" />
+                      <Text style={styles.timeSlotsEmptyText}>
+                        Please select a date first
+                      </Text>
+                    </View>
+                  ) : (
+                    <View style={styles.timeSlotsWrapper}>
+                      {availableTimeSlots.map((timeStr) => {
+                        const isSelected = bookingForm.selectedTime === timeStr;
+                        return (
+                          <TouchableOpacity
+                            key={timeStr}
+                            style={[
+                              styles.timeSlotBadge,
+                              isSelected && styles.timeSlotBadgeSelected,
+                            ]}
+                            onPress={() => {
+                              setBookingForm(prev => ({ ...prev, selectedTime: timeStr }));
+                            }}
+                            activeOpacity={0.7}
+                          >
+                            <Text
+                              style={[
+                                styles.timeSlotBadgeText,
+                                isSelected && styles.timeSlotBadgeTextSelected,
+                              ]}
+                            >
+                              {(() => {
+                                const [hour, minute] = timeStr.split(':');
+                                const h = parseInt(hour);
+                                const m = parseInt(minute);
+                                const period = h >= 12 ? 'PM' : 'AM';
+                                const displayHour = h === 0 ? 12 : h > 12 ? h - 12 : h;
+                                return `${displayHour}:${m.toString().padStart(2, '0')} ${period}`;
+                              })()}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  )}
                 </View>
               </View>
 
@@ -730,10 +1097,206 @@ export default function ServiceDetailsScreen() {
                 />
               </View>
 
+              {/* Payment Method */}
+              <View style={styles.formSection}>
+                <Text style={styles.formLabel}>Payment Method *</Text>
+                <View style={styles.paymentMethodContainer}>
+                  <TouchableOpacity
+                    style={[
+                      styles.paymentMethodOption,
+                      bookingForm.paymentMethod === 'paypal' && styles.paymentMethodOptionSelected,
+                    ]}
+                    onPress={() => setBookingForm(prev => ({ ...prev, paymentMethod: 'paypal' }))}
+                  >
+                    <Ionicons 
+                      name={bookingForm.paymentMethod === 'paypal' ? 'radio-button-on' : 'radio-button-off'} 
+                      size={24} 
+                      color={bookingForm.paymentMethod === 'paypal' ? '#22c55e' : '#9ca3af'} 
+                    />
+                    <Text style={styles.paymentMethodText}>PayPal</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[
+                      styles.paymentMethodOption,
+                      bookingForm.paymentMethod === 'paymaya' && styles.paymentMethodOptionSelected,
+                    ]}
+                    onPress={() => setBookingForm(prev => ({ ...prev, paymentMethod: 'paymaya' }))}
+                  >
+                    <Ionicons 
+                      name={bookingForm.paymentMethod === 'paymaya' ? 'radio-button-on' : 'radio-button-off'} 
+                      size={24} 
+                      color={bookingForm.paymentMethod === 'paymaya' ? '#22c55e' : '#9ca3af'} 
+                    />
+                    <Text style={styles.paymentMethodText}>PayMaya</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
               {/* Total Price */}
               <View style={styles.totalPriceContainer}>
                 <Text style={styles.totalPriceLabel}>Total Price:</Text>
                 <Text style={styles.totalPriceAmount}>
+                  {formatPrice(total, currency)}
+                </Text>
+              </View>
+
+              {/* Validation Errors */}
+              {validationErrors.length > 0 && (
+                <View style={styles.validationErrorContainer}>
+                  {validationErrors.map((error, index) => (
+                    <Text key={index} style={styles.validationErrorText}>
+                      • {error}
+                    </Text>
+                  ))}
+                </View>
+              )}
+            </ScrollView>
+
+            <View style={styles.modalFooter}>
+              <TouchableOpacity
+                style={styles.cancelButton}
+                onPress={() => {
+                  setShowBookingModal(false);
+                  setValidationErrors([]);
+                }}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.submitButton, (bookingLoading || validating) && styles.submitButtonDisabled]}
+                onPress={handleShowSummary}
+                disabled={bookingLoading || validating}
+              >
+                {validating ? (
+                  <>
+                    <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
+                    <Text style={styles.submitButtonText}>Validating...</Text>
+                  </>
+                ) : bookingLoading ? (
+                  <ActivityIndicator size="small" color="white" />
+                ) : (
+                  <>
+                    <Text style={styles.submitButtonText}>Review Booking</Text>
+                    <Ionicons name="arrow-forward" size={20} color="white" />
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Booking Summary Modal */}
+      <Modal
+        visible={showBookingSummary}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowBookingSummary(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Review Booking</Text>
+              <TouchableOpacity onPress={() => setShowBookingSummary(false)}>
+                <Ionicons name="close" size={24} color="#1f2937" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
+              {/* Service Info */}
+              <View style={styles.summarySection}>
+                <Text style={styles.summarySectionTitle}>Service</Text>
+                <Text style={styles.summaryText}>{service?.title}</Text>
+                {service?.provider && (
+                  <Text style={styles.summarySubtext}>
+                    Provider: {service.provider.firstName} {service.provider.lastName}
+                  </Text>
+                )}
+              </View>
+
+              {/* Date & Time */}
+              <View style={styles.summarySection}>
+                <Text style={styles.summarySectionTitle}>Date & Time</Text>
+                <Text style={styles.summaryText}>
+                  {(() => {
+                    try {
+                      const date = new Date(bookingForm.selectedDate);
+                      if (!isNaN(date.getTime())) {
+                        return date.toLocaleDateString('en-US', {
+                          weekday: 'long',
+                          year: 'numeric',
+                          month: 'long',
+                          day: 'numeric',
+                        });
+                      }
+                    } catch {}
+                    return bookingForm.selectedDate;
+                  })()}
+                </Text>
+                <Text style={styles.summarySubtext}>
+                  {bookingForm.selectedTime
+                    ? (() => {
+                        try {
+                          const [hour, minute] = bookingForm.selectedTime.split(':');
+                          const h = parseInt(hour);
+                          const m = parseInt(minute);
+                          const period = h >= 12 ? 'PM' : 'AM';
+                          const displayHour = h === 0 ? 12 : h > 12 ? h - 12 : h;
+                          return `${displayHour}:${m.toString().padStart(2, '0')} ${period}`;
+                        } catch {
+                          return bookingForm.selectedTime;
+                        }
+                      })()
+                    : 'Not selected'}
+                </Text>
+              </View>
+
+              {/* Address */}
+              <View style={styles.summarySection}>
+                <Text style={styles.summarySectionTitle}>Service Address</Text>
+                <Text style={styles.summaryText}>{bookingForm.address}</Text>
+                <Text style={styles.summarySubtext}>
+                  {bookingForm.city}, {bookingForm.state} {bookingForm.zipCode}
+                </Text>
+              </View>
+
+              {/* Package & Add-ons */}
+              {bookingForm.selectedPackage && (
+                <View style={styles.summarySection}>
+                  <Text style={styles.summarySectionTitle}>Package</Text>
+                  <Text style={styles.summaryText}>{bookingForm.selectedPackage}</Text>
+                </View>
+              )}
+
+              {bookingForm.selectedAddOns.length > 0 && (
+                <View style={styles.summarySection}>
+                  <Text style={styles.summarySectionTitle}>Add-ons</Text>
+                  {bookingForm.selectedAddOns.map((addOn, index) => (
+                    <Text key={index} style={styles.summaryText}>• {addOn}</Text>
+                  ))}
+                </View>
+              )}
+
+              {/* Special Instructions */}
+              {bookingForm.specialInstructions && (
+                <View style={styles.summarySection}>
+                  <Text style={styles.summarySectionTitle}>Special Instructions</Text>
+                  <Text style={styles.summaryText}>{bookingForm.specialInstructions}</Text>
+                </View>
+              )}
+
+              {/* Payment Method */}
+              <View style={styles.summarySection}>
+                <Text style={styles.summarySectionTitle}>Payment Method</Text>
+                <Text style={styles.summaryText}>
+                  {bookingForm.paymentMethod === 'paypal' ? 'PayPal' : 'PayMaya'}
+                </Text>
+              </View>
+
+              {/* Total Price */}
+              <View style={styles.summaryTotalContainer}>
+                <Text style={styles.summaryTotalLabel}>Total Amount:</Text>
+                <Text style={styles.summaryTotalAmount}>
                   {formatPrice(total, currency)}
                 </Text>
               </View>
@@ -742,9 +1305,12 @@ export default function ServiceDetailsScreen() {
             <View style={styles.modalFooter}>
               <TouchableOpacity
                 style={styles.cancelButton}
-                onPress={() => setShowBookingModal(false)}
+                onPress={() => {
+                  setShowBookingSummary(false);
+                  setShowBookingModal(true);
+                }}
               >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
+                <Text style={styles.cancelButtonText}>Back</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.submitButton, bookingLoading && styles.submitButtonDisabled]}
@@ -755,10 +1321,254 @@ export default function ServiceDetailsScreen() {
                   <ActivityIndicator size="small" color="white" />
                 ) : (
                   <>
-                    <Text style={styles.submitButtonText}>Confirm Booking</Text>
+                    <Text style={styles.submitButtonText}>Confirm & Pay</Text>
                     <Ionicons name="checkmark" size={20} color="white" />
                   </>
                 )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Booking Confirmation Modal */}
+      <Modal
+        visible={showBookingConfirmation}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => {
+          setShowBookingConfirmation(false);
+          router.back();
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.confirmationContainer}>
+              <View style={styles.confirmationIconContainer}>
+                <Ionicons name="checkmark-circle" size={80} color="#22c55e" />
+              </View>
+              <Text style={styles.confirmationTitle}>Booking Confirmed!</Text>
+              <Text style={styles.confirmationMessage}>
+                Your booking has been successfully created and payment has been processed.
+                You will receive a confirmation email shortly.
+              </Text>
+              {createdBookingId && (
+                <Text style={styles.confirmationBookingId}>
+                  Booking ID: {createdBookingId}
+                </Text>
+              )}
+              <TouchableOpacity
+                style={styles.confirmationButton}
+                onPress={() => {
+                  setShowBookingConfirmation(false);
+                  router.back();
+                }}
+              >
+                <Text style={styles.confirmationButtonText}>Done</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Date Picker Modal - Carousel Grid */}
+      <Modal
+        visible={showDatePicker}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowDatePicker(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.pickerModalContent}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Select Date</Text>
+              <TouchableOpacity onPress={() => setShowDatePicker(false)}>
+                <Ionicons name="close" size={24} color="#1f2937" />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.datePickerContainer}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.dateCarouselContainer}
+                snapToInterval={100}
+                decelerationRate="fast"
+                snapToAlignment="start"
+                pagingEnabled={false}
+                bounces={true}
+              >
+                {(() => {
+                  const today = new Date();
+                  today.setHours(0, 0, 0, 0);
+                  const dates: Date[] = [];
+                  
+                  // Generate dates starting from today, showing at least 7 days
+                  // But we'll show more days in the carousel for better UX
+                  for (let i = 0; i < 30; i++) {
+                    const date = new Date(today);
+                    date.setDate(date.getDate() + i);
+                    dates.push(date);
+                  }
+
+                  return dates.map((date, index) => {
+                    date.setHours(0, 0, 0, 0);
+                    const isToday = index === 0;
+                    const isPast = index > 0 ? false : date.getTime() < today.getTime();
+
+                    let isSelected = false;
+                    if (bookingForm.selectedDate) {
+                      try {
+                        const selectedDate = new Date(bookingForm.selectedDate);
+                        selectedDate.setHours(0, 0, 0, 0);
+                        isSelected = date.getTime() === selectedDate.getTime();
+                      } catch {
+                        isSelected = false;
+                      }
+                    }
+
+                    const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+                    const dayNumber = date.getDate();
+                    const monthName = date.toLocaleDateString('en-US', { month: 'short' });
+
+                    return (
+                      <TouchableOpacity
+                        key={`date-${index}-${date.getTime()}`}
+                        style={[
+                          styles.dateBlock,
+                          isSelected && styles.dateBlockSelected,
+                          isToday && !isSelected && styles.dateBlockToday,
+                          isPast && styles.dateBlockPast,
+                        ]}
+                        onPress={() => {
+                          if (!isPast) {
+                            const year = date.getFullYear();
+                            const month = String(date.getMonth() + 1).padStart(2, '0');
+                            const day = String(date.getDate()).padStart(2, '0');
+                            const selectedDateStr = `${year}-${month}-${day}`;
+                            setBookingForm(prev => ({ ...prev, selectedDate: selectedDateStr }));
+                            setShowDatePicker(false);
+                          }
+                        }}
+                        disabled={isPast}
+                        activeOpacity={0.7}
+                      >
+                        <Text
+                          style={[
+                            styles.dateBlockDayName,
+                            isSelected && styles.dateBlockTextSelected,
+                            isPast && styles.dateBlockTextPast,
+                            isToday && !isSelected && styles.dateBlockTextToday,
+                          ]}
+                        >
+                          {isToday ? 'Today' : dayName}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.dateBlockDayNumber,
+                            isSelected && styles.dateBlockTextSelected,
+                            isPast && styles.dateBlockTextPast,
+                            isToday && !isSelected && styles.dateBlockTextToday,
+                          ]}
+                        >
+                          {dayNumber}
+                        </Text>
+                        <Text
+                          style={[
+                            styles.dateBlockMonth,
+                            isSelected && styles.dateBlockTextSelected,
+                            isPast && styles.dateBlockTextPast,
+                            isToday && !isSelected && styles.dateBlockTextToday,
+                          ]}
+                        >
+                          {monthName}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  });
+                })()}
+              </ScrollView>
+            </View>
+            <View style={styles.pickerFooter}>
+              <TouchableOpacity
+                style={styles.pickerCancelButton}
+                onPress={() => setShowDatePicker(false)}
+              >
+                <Text style={styles.pickerCancelButtonText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Time Picker Modal - Tag Based */}
+      <Modal
+        visible={showTimePicker}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowTimePicker(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.pickerModalContent}>
+            <View style={styles.pickerHeader}>
+              <Text style={styles.pickerTitle}>Select Time</Text>
+              <TouchableOpacity onPress={() => setShowTimePicker(false)}>
+                <Ionicons name="close" size={24} color="#1f2937" />
+              </TouchableOpacity>
+            </View>
+            <View style={styles.timePickerContainer}>
+              <ScrollView style={styles.timeTagsScroll} showsVerticalScrollIndicator={false}>
+                <View style={styles.timeTagsContainer}>
+                  {(() => {
+                    const timeSlots: string[] = [];
+                    // Generate time slots from 6:00 AM to 10:00 PM with 15-minute intervals
+                    for (let hour = 6; hour < 22; hour++) {
+                      for (let minute = 0; minute < 60; minute += 15) {
+                        const timeStr = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+                        timeSlots.push(timeStr);
+                      }
+                    }
+                    // Add 10:00 PM
+                    timeSlots.push('22:00');
+
+                    return timeSlots.map((timeStr) => {
+                      const isSelected = bookingForm.selectedTime === timeStr;
+                      return (
+                        <TouchableOpacity
+                          key={timeStr}
+                          style={[styles.timeTag, isSelected && styles.timeTagSelected]}
+                          onPress={() => {
+                            setBookingForm(prev => ({ ...prev, selectedTime: timeStr }));
+                            setShowTimePicker(false);
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.timeTagText,
+                              isSelected && styles.timeTagTextSelected,
+                            ]}
+                          >
+                            {(() => {
+                              const [hour, minute] = timeStr.split(':');
+                              const h = parseInt(hour);
+                              const m = parseInt(minute);
+                              const period = h >= 12 ? 'PM' : 'AM';
+                              const displayHour = h === 0 ? 12 : h > 12 ? h - 12 : h;
+                              return `${displayHour}:${m.toString().padStart(2, '0')} ${period}`;
+                            })()}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    });
+                  })()}
+                </View>
+              </ScrollView>
+            </View>
+            <View style={styles.pickerFooter}>
+              <TouchableOpacity
+                style={styles.pickerCancelButton}
+                onPress={() => setShowTimePicker(false)}
+              >
+                <Text style={styles.pickerCancelButtonText}>Close</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1191,6 +2001,151 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
   },
+  dateBlockRow: {
+    marginTop: 8,
+    marginBottom: 16,
+  },
+  timeLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6b7280',
+    marginBottom: 12,
+    marginTop: 4,
+  },
+  dateCarouselContainer: {
+    marginTop: 8,
+  },
+  dateCarouselContent: {
+    paddingHorizontal: 4,
+    gap: 10,
+  },
+  dateBlockCard: {
+    width: 100,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    backgroundColor: '#ffffff',
+    borderWidth: 1.5,
+    borderColor: '#e5e7eb',
+    minHeight: 100,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  dateBlockCardSelected: {
+    backgroundColor: '#22c55e',
+    borderColor: '#22c55e',
+    shadowColor: '#22c55e',
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  dateBlockCardToday: {
+    borderColor: '#22c55e',
+    borderWidth: 2,
+    backgroundColor: '#f0fdf4',
+  },
+  dateBlockCardPast: {
+    backgroundColor: '#f9fafb',
+    borderColor: '#e5e7eb',
+    opacity: 0.5,
+  },
+  dateBlockCardDayName: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#6b7280',
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  dateBlockCardDayNumber: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1f2937',
+    marginBottom: 2,
+  },
+  dateBlockCardMonth: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: '#9ca3af',
+    textTransform: 'uppercase',
+  },
+  dateBlockCardTextSelected: {
+    color: '#ffffff',
+  },
+  dateBlockCardTextPast: {
+    color: '#d1d5db',
+  },
+  timeSlotsContainer: {
+    marginTop: 4,
+    minHeight: 60,
+  },
+  timeSlotsWrapper: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  timeSlotsLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+    gap: 12,
+  },
+  timeSlotsLoadingText: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  timeSlotsEmpty: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+    gap: 12,
+  },
+  timeSlotsEmptyText: {
+    fontSize: 14,
+    color: '#9ca3af',
+    fontStyle: 'italic',
+  },
+  timeSlotBadge: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#f9fafb',
+    borderWidth: 1.5,
+    borderColor: '#e5e7eb',
+    minWidth: 70,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  timeSlotBadgeSelected: {
+    backgroundColor: '#22c55e',
+    borderColor: '#22c55e',
+    shadowColor: '#22c55e',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  timeSlotBadgeText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+  timeSlotBadgeTextSelected: {
+    color: 'white',
+    fontWeight: '700',
+  },
   dateInput: {
     flex: 1,
     borderWidth: 1,
@@ -1288,6 +2243,368 @@ const styles = StyleSheet.create({
   submitButtonText: {
     fontSize: 16,
     fontWeight: '600',
+    color: 'white',
+  },
+  paymentMethodContainer: {
+    gap: 12,
+  },
+  paymentMethodOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#e5e7eb',
+    backgroundColor: 'white',
+    gap: 12,
+  },
+  paymentMethodOptionSelected: {
+    borderColor: '#22c55e',
+    backgroundColor: '#f0fdf4',
+  },
+  paymentMethodText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#1f2937',
+  },
+  validationErrorContainer: {
+    marginTop: 16,
+    padding: 12,
+    backgroundColor: '#fef2f2',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#fecaca',
+  },
+  validationErrorText: {
+    fontSize: 14,
+    color: '#dc2626',
+    marginBottom: 4,
+  },
+  summarySection: {
+    marginBottom: 24,
+    paddingBottom: 24,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  summarySectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6b7280',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  summaryText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#1f2937',
+    marginBottom: 4,
+  },
+  summarySubtext: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  summaryTotalContainer: {
+    marginTop: 16,
+    padding: 20,
+    backgroundColor: '#f0fdf4',
+    borderRadius: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  summaryTotalLabel: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+  summaryTotalAmount: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#22c55e',
+  },
+  confirmationContainer: {
+    alignItems: 'center',
+    padding: 32,
+  },
+  confirmationIconContainer: {
+    marginBottom: 24,
+  },
+  confirmationTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#1f2937',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  confirmationMessage: {
+    fontSize: 16,
+    color: '#6b7280',
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: 24,
+  },
+  confirmationBookingId: {
+    fontSize: 14,
+    color: '#9ca3af',
+    marginBottom: 32,
+    fontFamily: 'monospace',
+  },
+  confirmationButton: {
+    width: '100%',
+    paddingVertical: 16,
+    borderRadius: 8,
+    backgroundColor: '#22c55e',
+    alignItems: 'center',
+  },
+  confirmationButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
+  },
+  pickerButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 8,
+    backgroundColor: 'white',
+  },
+  pickerButtonText: {
+    flex: 1,
+    fontSize: 16,
+    color: '#1f2937',
+    fontWeight: '500',
+  },
+  pickerButtonTextPlaceholder: {
+    color: '#9ca3af',
+  },
+  pickerModalContent: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '90%',
+    paddingBottom: 20,
+  },
+  pickerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e5e7eb',
+  },
+  pickerTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1f2937',
+  },
+  pickerFooter: {
+    flexDirection: 'row',
+    gap: 12,
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: '#e5e7eb',
+  },
+  pickerCancelButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    alignItems: 'center',
+  },
+  pickerCancelButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#6b7280',
+  },
+  pickerConfirmButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 8,
+    backgroundColor: '#22c55e',
+    alignItems: 'center',
+  },
+  pickerConfirmButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
+  },
+  datePickerContainer: {
+    paddingVertical: 16,
+    minHeight: 140,
+    maxHeight: 160,
+  },
+  monthNavigation: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    paddingHorizontal: 20,
+  },
+  monthYearText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+  dayLabelsRow: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  dayLabel: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  dayLabelText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#6b7280',
+    textTransform: 'uppercase',
+  },
+  calendarGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  calendarDay: {
+    width: '14.28%',
+    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  calendarDaySelected: {
+    backgroundColor: '#22c55e',
+  },
+  calendarDayToday: {
+    backgroundColor: '#f0fdf4',
+    borderWidth: 2,
+    borderColor: '#22c55e',
+  },
+  calendarDayText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#1f2937',
+  },
+  calendarDayTextSelected: {
+    color: 'white',
+    fontWeight: '600',
+  },
+  calendarDayTextPast: {
+    color: '#d1d5db',
+  },
+  calendarDayTextToday: {
+    color: '#22c55e',
+    fontWeight: '700',
+  },
+  dateBlock: {
+    width: 85,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    backgroundColor: '#ffffff',
+    borderWidth: 1.5,
+    borderColor: '#e5e7eb',
+    marginRight: 10,
+    minHeight: 115,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  dateBlockSelected: {
+    backgroundColor: '#22c55e',
+    borderColor: '#22c55e',
+    borderWidth: 2,
+    shadowColor: '#22c55e',
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+    transform: [{ scale: 1.05 }],
+  },
+  dateBlockToday: {
+    backgroundColor: '#f0fdf4',
+    borderColor: '#22c55e',
+    borderWidth: 2,
+  },
+  dateBlockPast: {
+    opacity: 0.4,
+    backgroundColor: '#f9fafb',
+  },
+  dateBlockDayName: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#6b7280',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 8,
+  },
+  dateBlockDayNumber: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#1f2937',
+    marginBottom: 6,
+    lineHeight: 36,
+  },
+  dateBlockMonth: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#9ca3af',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+  },
+  dateBlockTextSelected: {
+    color: 'white',
+  },
+  dateBlockTextPast: {
+    color: '#d1d5db',
+  },
+  dateBlockTextToday: {
+    color: '#22c55e',
+  },
+  timePickerContainer: {
+    padding: 20,
+    maxHeight: 500,
+  },
+  timeTagsScroll: {
+    flex: 1,
+  },
+  timeTagsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  timeTag: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    backgroundColor: '#f9fafb',
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    minWidth: 80,
+    alignItems: 'center',
+  },
+  timeTagSelected: {
+    backgroundColor: '#22c55e',
+    borderColor: '#22c55e',
+  },
+  timeTagText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+  timeTagTextSelected: {
     color: 'white',
   },
 });

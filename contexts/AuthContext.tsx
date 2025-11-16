@@ -1,5 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router } from 'expo-router';
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { Alert } from 'react-native';
 import { apiService, AuthResponse, TokenExpiredError } from '../services/api';
 
 interface User {
@@ -38,6 +40,7 @@ interface AuthContextType {
   uploadPortfolio: (portfolioData: FormData) => Promise<void>;
   refreshUserData: () => Promise<void>;
   signOut: () => Promise<void>;
+  handleTokenExpiration: (showAlert?: boolean) => Promise<void>;
 } 
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -140,15 +143,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   // Helper function to handle token expiration
-  const handleTokenExpiration = async () => {
+  const handleTokenExpiration = async (showAlert: boolean = true) => {
     try {
       // Clear auth state
       await AsyncStorage.multiRemove(['user', 'token']);
       setUser(null);
       setToken(null);
       console.log('Auth state cleared due to token expiration');
+      
+      // Show alert and redirect to login
+      if (showAlert) {
+        Alert.alert(
+          'Session Expired',
+          'Your session has expired. Please sign in again.',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                router.replace('/(auth)/signin');
+              },
+            },
+          ],
+          { cancelable: false }
+        );
+      } else {
+        router.replace('/(auth)/signin');
+      }
     } catch (error) {
       console.error('Error handling token expiration:', error);
+      // Still try to redirect even if clearing storage fails
+      router.replace('/(auth)/signin');
     }
   };
 
@@ -282,7 +306,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       uploadAvatar,
       uploadPortfolio,
       refreshUserData,
-      signOut 
+      signOut,
+      handleTokenExpiration
     }}>
       {children}
     </AuthContext.Provider>

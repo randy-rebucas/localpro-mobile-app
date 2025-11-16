@@ -122,29 +122,31 @@ class ApiService {
       const response = await fetch(url, config);
       clearTimeout(timeoutId);
       
-      // Check if response is ok before trying to parse JSON
-      if (!response.ok) {
-        let errorMessage = `HTTP error! status: ${response.status}`;
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.message || errorMessage;
-        } catch (parseError) {
-          console.log('Could not parse error response as JSON');
+      // Parse response data (whether success or error)
+      let data: any;
+      let errorMessage: string | undefined;
+      
+      try {
+        const responseText = await response.text();
+        if (responseText) {
+          data = JSON.parse(responseText);
         }
-        throw new Error(errorMessage);
+      } catch (parseError) {
+        // If response is not JSON, use status text
+        console.log('Could not parse response as JSON');
       }
-
-      const data = await response.json();
 
       console.log('API Response:', {
         status: response.status,
         data
       });
 
+      // Check if response is ok
       if (!response.ok) {
-        const errorMessage = data.message || `HTTP error! status: ${response.status}`;
+        // Extract error message from response
+        errorMessage = data?.message || data?.error || `HTTP error! status: ${response.status}`;
         
-        // Check if token has expired
+        // Check if token has expired BEFORE throwing error
         if (this.isTokenExpired(response.status, errorMessage)) {
           // Clear auth data
           await this.clearAuthData();
@@ -152,6 +154,7 @@ class ApiService {
           throw new TokenExpiredError(errorMessage);
         }
         
+        // For non-token errors, throw regular error
         throw new Error(errorMessage);
       }
 
@@ -372,6 +375,71 @@ class ApiService {
   async getUserBookings(token: string): Promise<ApiResponse> {
     return this.request('/api/user/bookings', {
       method: 'GET',
+    }, token);
+  }
+
+  // Booking Methods
+  async createBooking(token: string, bookingData: {
+    serviceId: string;
+    date: string;
+    time: string;
+    address: {
+      street: string;
+      city: string;
+      state: string;
+      zipCode: string;
+    };
+    specialInstructions?: string;
+    package?: string;
+    addOns?: string[];
+    quantity?: number;
+    area?: number;
+    totalPrice: number;
+    paymentMethod?: 'paypal' | 'paymaya';
+  }): Promise<ApiResponse> {
+    return this.request(API_CONFIG.ENDPOINTS.MARKETPLACE.BOOKINGS.CREATE, {
+      method: 'POST',
+      body: JSON.stringify(bookingData),
+    }, token);
+  }
+
+  async approvePayPalPayment(token: string, bookingId: string, orderId: string): Promise<ApiResponse> {
+    return this.request(API_CONFIG.ENDPOINTS.MARKETPLACE.BOOKINGS.PAYPAL_APPROVE, {
+      method: 'POST',
+      body: JSON.stringify({ bookingId, orderId }),
+    }, token);
+  }
+
+  async createPayMayaCheckout(token: string, bookingId: string, amount: number, currency: string = 'PHP'): Promise<ApiResponse> {
+    return this.request('/api/paymaya/create-checkout', {
+      method: 'POST',
+      body: JSON.stringify({ bookingId, amount, currency }),
+    }, token);
+  }
+
+  async validateServiceArea(serviceId: string, address: {
+    street: string;
+    city: string;
+    state: string;
+    zipCode: string;
+  }, token?: string): Promise<ApiResponse> {
+    return this.request('/api/maps/validate-service-area', {
+      method: 'POST',
+      body: JSON.stringify({ serviceId, address }),
+    }, token);
+  }
+
+  async checkServiceAvailability(serviceId: string, date: string, time: string, token?: string): Promise<ApiResponse> {
+    return this.request(`${API_CONFIG.ENDPOINTS.MARKETPLACE.SERVICES.BY_ID(serviceId)}/availability`, {
+      method: 'POST',
+      body: JSON.stringify({ date, time }),
+    }, token);
+  }
+
+  async getAvailableTimeSlots(serviceId: string, date: string, token?: string): Promise<ApiResponse> {
+    return this.request(`${API_CONFIG.ENDPOINTS.MARKETPLACE.SERVICES.BY_ID(serviceId)}/availability/slots`, {
+      method: 'POST',
+      body: JSON.stringify({ date }),
     }, token);
   }
 

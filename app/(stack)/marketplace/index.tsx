@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../../contexts/AuthContext';
-import { apiService } from '../../../services/api';
+import { apiService, TokenExpiredError } from '../../../services/api';
 
 interface MarketplaceService {
   _id?: string;
@@ -136,7 +136,7 @@ const emojiToIonicon = (emoji: string): keyof typeof Ionicons.glyphMap => {
 
 export default function MarketplaceScreen() {
   const router = useRouter();
-  const { token } = useAuth();
+  const { token, handleTokenExpiration } = useAuth();
   const [categories, setCategories] = useState<ServiceCategory[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [services, setServices] = useState<MarketplaceService[]>([]);
@@ -198,6 +198,11 @@ export default function MarketplaceScreen() {
         }
       } catch (err) {
         console.error('Error fetching marketplace categories:', err);
+        // Handle token expiration
+        if (err instanceof TokenExpiredError) {
+          await handleTokenExpiration();
+          return;
+        }
         setError(err instanceof Error ? err.message : 'An error occurred');
         setCategories([]);
       } finally {
@@ -301,6 +306,11 @@ export default function MarketplaceScreen() {
       }
     } catch (err) {
       console.error('Error fetching services:', err);
+      // Handle token expiration
+      if (err instanceof TokenExpiredError) {
+        await handleTokenExpiration();
+        return;
+      }
       setError(err instanceof Error ? err.message : 'An error occurred');
       if (!append) {
         setServices([]);

@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../../contexts/AuthContext';
-import { apiService } from '../../../services/api';
+import { apiService, TokenExpiredError } from '../../../services/api';
 
 interface MarketplaceService {
   _id?: string;
@@ -130,7 +130,7 @@ export default function MarketplaceCategoryScreen() {
     categoryDescription: string;
     subcategories?: string;
   }>();
-  const { token } = useAuth();
+  const { token, handleTokenExpiration } = useAuth();
   
   // State
   const [services, setServices] = useState<MarketplaceService[]>([]);
@@ -235,6 +235,11 @@ export default function MarketplaceCategoryScreen() {
       }
     } catch (err) {
       console.error('Error fetching marketplace services:', err);
+      // Handle token expiration
+      if (err instanceof TokenExpiredError) {
+        await handleTokenExpiration();
+        return;
+      }
       setError(err instanceof Error ? err.message : 'An error occurred');
       if (!append) {
         setServices([]);
